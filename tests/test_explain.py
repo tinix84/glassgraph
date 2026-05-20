@@ -33,8 +33,10 @@ def test_explain_filter_canonical(wiki_dir, tmp_path, explain_mod, index_mod):
     raw.write_text("---\nsource_url: x\n---\nTesla and BYD made announcements.\n", encoding="utf-8")
     automaton = index_mod.build_index(wiki_dir, tmp_path / "m.json", tmp_path / "a.json")
     output = explain_mod.explain_file(raw, automaton, filter_canonical="Tesla", show_suppressed=False, context_chars=10)
-    assert "Tesla" in output
-    assert "BYD" not in output
+    # Tesla hit should be present
+    assert "→ Tesla" in output
+    # BYD hit should NOT be present (filtered out) — but BYD may appear in Tesla's context window
+    assert "→ BYD" not in output
 
 
 def test_explain_show_suppressed(wiki_dir, tmp_path, explain_mod, index_mod, disambiguation_yaml):

@@ -57,14 +57,11 @@ def explain_file(
 
     lines: list[str] = []
     unique_canonicals: set[str] = set()
-    # When filtering to one canonical, suppress surrounding context to avoid leaking
-    # other entity names that happen to fall within the context window.
-    effective_context = 0 if filter_canonical else context_chars
     for start, end, canonical, alias in hits:
         if filter_canonical and canonical != filter_canonical:
             continue
         unique_canonicals.add(canonical)
-        lines.append(format_hit(body, start, end, canonical, alias, effective_context))
+        lines.append(format_hit(body, start, end, canonical, alias, context_chars))
 
     if show_suppressed and warnings:
         lines.append("")
