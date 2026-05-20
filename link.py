@@ -44,6 +44,10 @@ def _import_graph():
     return _import_module("graph")
 
 
+def _import_lint():
+    return _import_module("lint")
+
+
 def _result_to_dict(result) -> dict:
     return {
         "source": result.source,
@@ -101,6 +105,32 @@ def run_single(
     print(summary)
 
 
+def _lint_gate(wiki_root: Path) -> bool:
+    """Run lint and print report if CRITICAL findings exist.
+
+    Returns True (aborted) if any CRITICAL finding, False otherwise.
+    Callers decide whether to sys.exit; this function never calls sys.exit.
+    """
+    lint_mod = _import_lint()
+    findings = lint_mod.run_lint(wiki_root)
+    critical = [f for f in findings if f.severity == "CRITICAL"]
+    if critical:
+        print(lint_mod.format_report(findings))
+        print(
+            f"\nABORTED: {len(critical)} CRITICAL lint finding(s). Run --no-lint to bypass.",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
+def run_lint_cmd(wiki_root: Path = _WIKI_ROOT) -> int:
+    lint_mod = _import_lint()
+    findings = lint_mod.run_lint(wiki_root)
+    print(lint_mod.format_report(findings))
+    return lint_mod.exit_code_from_findings(findings)
+
+
 def run_backfill(
     wiki_root: Path = _WIKI_ROOT,
     raw_dir: Path = _RAW_DIR,
@@ -110,7 +140,12 @@ def run_backfill(
     report_path: Path = _REPORT_PATH,
     dry_run: bool = False,
     skip_sanity_gate: bool = False,
-) -> None:
+    no_lint: bool = False,
+) -> bool:
+    """Returns True if aborted by lint gate, False on normal completion."""
+    if not no_lint and _lint_gate(wiki_root):
+        return True  # aborted by lint gate
+
     index_mod = _import_index()
     linker_mod = _import_linker()
     graph_mod = _import_graph()
@@ -173,12 +208,13 @@ def run_backfill(
     if dry_run:
         print(report)
         print(summary)
-        return
+        return False
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")
     print(summary)
     print(f"Report written to {report_path}")
+    return False
 
 
 def main() -> None:
@@ -187,16 +223,21 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        help="'backfill' or path to a raw/*.md file (e.g. raw/Tesla.md)",
+        help="'backfill', 'lint', or path to a raw/*.md file (e.g. raw/Tesla.md)",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
     parser.add_argument("--verbose", action="store_true", help="Show per-entity hits")
     parser.add_argument("--skip-sanity-gate", action="store_true", help="Skip 10-source pause in backfill")
+    parser.add_argument("--no-lint", action="store_true", help="Skip lint gate at start of backfill")
     args = parser.parse_args()
 
-    if args.command == "backfill":
-        run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate)
+    if args.command == "lint":
+        sys.exit(run_lint_cmd())
+    elif args.command == "backfill":
+        aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint)
+        if aborted:
+            sys.exit(1)
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():
