@@ -135,10 +135,7 @@ def run_explain(
     show_suppressed: bool = False,
     context_chars: int = 30,
 ) -> None:
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("explain", _HERE / "explain.py")
-    explain_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(explain_mod)
+    explain_mod = _import_module("explain")
     index_mod = _import_index()
     manifest_path = index_dir / "manifest.json"
     aliases_path = index_dir / "aliases.json"
