@@ -47,6 +47,11 @@ def explain_mod():
     return _load("explain")
 
 
+@pytest.fixture(scope="session")
+def suggest_mod():
+    return _load("suggest")
+
+
 @pytest.fixture
 def wiki_dir(tmp_path):
     """Synthetic wiki with 3 entity pages: Tesla, BYD, SiC-MOSFET."""

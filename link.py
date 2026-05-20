@@ -150,8 +150,28 @@ def run_explain(
     print(out)
 
 
-def run_suggest(raw_path: Path) -> None:
-    print("suggest: not yet implemented (Task 3)")
+def run_suggest(
+    raw_path: Path,
+    wiki_root: Path = _WIKI_ROOT,
+    index_dir: Path = _INDEX_DIR,
+    top_n: int = 20,
+) -> None:
+    suggest_mod = _import_module("suggest")
+    index_mod = _import_index()
+    linker = _import_linker()
+
+    aliases_path = index_dir / "aliases.json"
+    # Build alias index first (so we know what's already aliased)
+    index_mod.build_index(wiki_root, index_dir / "manifest.json", aliases_path)
+    known_aliases = set(json.loads(aliases_path.read_text(encoding="utf-8")).keys())
+
+    df_cache = index_dir / "token-df.json"
+    df = suggest_mod.load_or_build_df(wiki_root / "sources", df_cache)
+
+    text = raw_path.read_text(encoding="utf-8")
+    body = linker._preprocess(text)
+    ranked = suggest_mod.rank_candidates(body, known_aliases=known_aliases, df=df, top_n=top_n)
+    print(suggest_mod.format_report(ranked))
 
 
 def run_lint_cmd(wiki_root: Path = _WIKI_ROOT) -> int:
