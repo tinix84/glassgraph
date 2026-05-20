@@ -77,7 +77,8 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
     """Map every alias (and page stem) → canonical stem.
 
     Used by broken-wikilink and touches-orphan to verify references resolve.
-    Last-write-wins on collisions (consistent with Stage 1 dedup logic).
+    First-write-wins on collisions: each page registers its stem first, then
+    aliases; duplicate aliases across pages keep the first-seen mapping.
     """
     canonical_index: dict[str, str] = {}
     for page in _entity_pages(wiki_root):

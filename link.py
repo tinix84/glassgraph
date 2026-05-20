@@ -106,22 +106,25 @@ def run_single(
 
 
 def _lint_gate(wiki_root: Path) -> bool:
-    """Run lint and print report if CRITICAL findings exist.
-
-    Returns True (aborted) if any CRITICAL finding, False otherwise.
-    Callers decide whether to sys.exit; this function never calls sys.exit.
-    """
+    """Run lint and return True if backfill should abort. Prints CRITICAL-only on abort."""
     lint_mod = _import_lint()
     findings = lint_mod.run_lint(wiki_root)
     critical = [f for f in findings if f.severity == "CRITICAL"]
-    if critical:
-        print(lint_mod.format_report(findings))
+    if not critical:
+        return False
+    warn_count = sum(1 for f in findings if f.severity == "WARN")
+    info_count = sum(1 for f in findings if f.severity == "INFO")
+    print(lint_mod.format_report(critical), file=sys.stderr)
+    if warn_count or info_count:
         print(
-            f"\nABORTED: {len(critical)} CRITICAL lint finding(s). Run --no-lint to bypass.",
+            f"({warn_count} WARN, {info_count} INFO suppressed — run 'link.py lint' for full report)",
             file=sys.stderr,
         )
-        return True
-    return False
+    print(
+        f"\nABORTED: {len(critical)} CRITICAL lint finding(s). Run --no-lint to bypass.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def run_lint_cmd(wiki_root: Path = _WIKI_ROOT) -> int:
