@@ -42,6 +42,11 @@ def lint_mod():
     return _load("lint")
 
 
+@pytest.fixture(scope="session")
+def explain_mod():
+    return _load("explain")
+
+
 @pytest.fixture
 def wiki_dir(tmp_path):
     """Synthetic wiki with 3 entity pages: Tesla, BYD, SiC-MOSFET."""

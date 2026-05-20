@@ -127,6 +127,36 @@ def _lint_gate(wiki_root: Path) -> bool:
     return True
 
 
+def run_explain(
+    raw_path: Path,
+    wiki_root: Path = _WIKI_ROOT,
+    index_dir: Path = _INDEX_DIR,
+    filter_canonical: str | None = None,
+    show_suppressed: bool = False,
+    context_chars: int = 30,
+) -> None:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("explain", _HERE / "explain.py")
+    explain_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(explain_mod)
+    index_mod = _import_index()
+    manifest_path = index_dir / "manifest.json"
+    aliases_path = index_dir / "aliases.json"
+    automaton = index_mod.build_index(wiki_root, manifest_path, aliases_path)
+    out = explain_mod.explain_file(
+        raw_path, automaton,
+        filter_canonical=filter_canonical,
+        show_suppressed=show_suppressed,
+        context_chars=context_chars,
+        disambiguation_yaml=_DISAMBIG_YAML,
+    )
+    print(out)
+
+
+def run_suggest(raw_path: Path) -> None:
+    print("suggest: not yet implemented (Task 3)")
+
+
 def run_lint_cmd(wiki_root: Path = _WIKI_ROOT) -> int:
     lint_mod = _import_lint()
     findings = lint_mod.run_lint(wiki_root)
@@ -221,18 +251,18 @@ def run_backfill(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Deterministic entity linking for 2brain wiki"
-    )
-    parser.add_argument(
-        "command",
-        help="'backfill', 'lint', or path to a raw/*.md file (e.g. raw/Tesla.md)",
-    )
+    parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
+    parser.add_argument("command", help="'backfill' | 'lint' | 'explain' | 'suggest' | path to raw/*.md")
+    parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
     parser.add_argument("--verbose", action="store_true", help="Show per-entity hits")
     parser.add_argument("--skip-sanity-gate", action="store_true", help="Skip 10-source pause in backfill")
     parser.add_argument("--no-lint", action="store_true", help="Skip lint gate at start of backfill")
+    parser.add_argument("--history", action="store_true", help="Track delta vs previous backfill")
+    parser.add_argument("--filter", default=None, help="Filter explain output to one canonical")
+    parser.add_argument("--suppressed", action="store_true", help="Show suppressed disambiguation hits")
+    parser.add_argument("--context", type=int, default=30, help="Context chars around each hit")
     args = parser.parse_args()
 
     if args.command == "lint":
@@ -241,6 +271,16 @@ def main() -> None:
         aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint)
         if aborted:
             sys.exit(1)
+    elif args.command == "explain":
+        if args.extra is None:
+            print("ERROR: explain requires a raw file path", file=sys.stderr)
+            sys.exit(1)
+        run_explain(Path(args.extra), filter_canonical=args.filter, show_suppressed=args.suppressed, context_chars=args.context)
+    elif args.command == "suggest":
+        if args.extra is None:
+            print("ERROR: suggest requires a raw file path", file=sys.stderr)
+            sys.exit(1)
+        run_suggest(Path(args.extra))
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():
