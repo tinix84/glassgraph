@@ -231,7 +231,7 @@ def check_missing_required_fields(wiki_root: Path) -> list[LintFinding]:
                 continue
             if not fm.get("source_url"):
                 findings.append(LintFinding(
-                    severity="WARN", check="missing-required-field",
+                    severity="CRITICAL", check="missing-required-field",
                     file=page, line=None,
                     message="source page missing required field 'source_url'",
                 ))

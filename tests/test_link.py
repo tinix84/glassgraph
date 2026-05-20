@@ -32,7 +32,10 @@ def _make_source_page(tmp_path: Path, name: str, touches: list[str]) -> Path:
     sources.mkdir(parents=True, exist_ok=True)
     p = sources / name
     fm_t = "\n".join(f"  - '[[{t}]]'" for t in touches)
-    p.write_text(f"---\ntouches:\n{fm_t}\n---\nBody.\n", encoding="utf-8")
+    p.write_text(
+        f"---\ntype: source\nsource_url: http://example.com/{name}\ntouches:\n{fm_t}\n---\nBody.\n",
+        encoding="utf-8",
+    )
     return p
 
 

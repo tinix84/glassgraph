@@ -120,7 +120,12 @@ def test_source_missing_url_caught(tmp_path, lint_mod):
     p.parent.mkdir(parents=True)
     p.write_text("---\ntype: source\n---\n", encoding="utf-8")  # missing source_url:
     findings = lint_mod.check_missing_required_fields(tmp_path / "wiki")
-    assert any(f.check == "missing-required-field" and "source_url" in f.message for f in findings)
+    assert any(
+        f.check == "missing-required-field"
+        and "source_url" in f.message
+        and f.severity == "CRITICAL"
+        for f in findings
+    )
 
 
 # ── Check 6: touches-orphan ────────────────────────────────────────────────
