@@ -102,6 +102,11 @@ def sample_body():
     )
 
 
+@pytest.fixture(scope="session")
+def history_mod():
+    return _load("history")
+
+
 @pytest.fixture
 def disambiguation_yaml(tmp_path):
     path = tmp_path / "disambiguation.yaml"

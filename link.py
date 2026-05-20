@@ -191,6 +191,7 @@ def run_backfill(
     dry_run: bool = False,
     skip_sanity_gate: bool = False,
     no_lint: bool = False,
+    with_history: bool = False,
 ) -> bool:
     """Returns True if aborted by lint gate, False on normal completion."""
     if not no_lint and _lint_gate(wiki_root):
@@ -264,6 +265,35 @@ def run_backfill(
     report_path.write_text(report, encoding="utf-8")
     print(summary)
     print(f"Report written to {report_path}")
+
+    if with_history:
+        from datetime import datetime, timezone
+        history_mod = _import_module("history")
+
+        history_path = cache_dir / "backfill-history.jsonl"
+        prev = history_mod.read_last_run(history_path)
+        entry = history_mod.build_history_entry(
+            ts=datetime.now(timezone.utc).isoformat(),
+            match_rate=graph_mod.compute_match_rate(G_current, G_stage1, sources),
+            sources=sources,
+            orphans=len(graph_mod.get_orphan_entities(G_stage1, entity_nodes)),
+            phantoms=len(phantoms),
+            G_current=G_current,
+            G_stage1=G_stage1,
+            entity_nodes=entity_nodes,
+            top_n=50,
+        )
+        if prev:
+            delta = history_mod.compute_delta(prev, entry, min_abs_delta=3)
+            delta_section = history_mod.format_delta_section(delta)
+            with report_path.open("a", encoding="utf-8") as f:
+                f.write(delta_section)
+            print(delta_section)
+        else:
+            print("\n(First backfill — no previous run to compare)")
+        history_mod.append_run(history_path, entry)
+        print(f"History entry appended to {history_path}")
+
     return False
 
 
@@ -285,7 +315,7 @@ def main() -> None:
     if args.command == "lint":
         sys.exit(run_lint_cmd())
     elif args.command == "backfill":
-        aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint)
+        aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint, with_history=args.history)
         if aborted:
             sys.exit(1)
     elif args.command == "explain":
