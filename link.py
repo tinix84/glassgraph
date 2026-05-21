@@ -174,9 +174,14 @@ def run_suggest(
     print(suggest_mod.format_report(ranked))
 
 
-def run_lint_cmd(wiki_root: Path = _WIKI_ROOT) -> int:
+def run_lint_cmd(
+    wiki_root: Path = _WIKI_ROOT,
+    severity_filter: str | None = None,
+) -> int:
     lint_mod = _import_lint()
     findings = lint_mod.run_lint(wiki_root)
+    if severity_filter:
+        findings = [f for f in findings if f.severity == severity_filter.upper()]
     print(lint_mod.format_report(findings))
     return lint_mod.exit_code_from_findings(findings)
 
@@ -310,10 +315,12 @@ def main() -> None:
     parser.add_argument("--filter", default=None, help="Filter explain output to one canonical")
     parser.add_argument("--suppressed", action="store_true", help="Show suppressed disambiguation hits")
     parser.add_argument("--context", type=int, default=30, help="Context chars around each hit")
+    parser.add_argument("--severity", default=None, choices=["CRITICAL", "WARN", "INFO"],
+                        help="Filter lint output to a single severity level")
     args = parser.parse_args()
 
     if args.command == "lint":
-        sys.exit(run_lint_cmd())
+        sys.exit(run_lint_cmd(severity_filter=args.severity))
     elif args.command == "backfill":
         aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint, with_history=args.history)
         if aborted:

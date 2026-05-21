@@ -77,10 +77,12 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
     """Map every alias (and page stem) → canonical stem.
 
     Used by broken-wikilink and touches-orphan to verify references resolve.
-    First-write-wins on collisions: each page registers its stem first, then
-    aliases; duplicate aliases across pages keep the first-seen mapping.
+    Includes entity-page stems + aliases, source-page stems, and root wiki pages
+    (index, log, overview). First-write-wins on collisions.
     """
     canonical_index: dict[str, str] = {}
+
+    # Entity pages: stem + aliases_en + aliases_cn
     for page in _entity_pages(wiki_root):
         canonical = page.stem
         canonical_index.setdefault(canonical, canonical)
@@ -94,6 +96,19 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
             for alias in val:
                 if isinstance(alias, str) and alias.strip():
                     canonical_index.setdefault(alias.strip(), canonical)
+
+    # Source pages: stem only (no aliases on sources)
+    sources_dir = wiki_root / "sources"
+    if sources_dir.exists():
+        for page in sorted(sources_dir.glob("*.md")):
+            canonical_index.setdefault(page.stem, page.stem)
+
+    # Root wiki pages: index, log, overview
+    for name in ("index", "log", "overview"):
+        p = wiki_root / f"{name}.md"
+        if p.exists():
+            canonical_index.setdefault(name, name)
+
     return canonical_index
 
 

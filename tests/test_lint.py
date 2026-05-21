@@ -191,3 +191,25 @@ def test_run_lint_exit_code_for_critical(tmp_path, lint_mod):
     assert lint_mod.exit_code_from_findings(findings_critical) == 1
     assert lint_mod.exit_code_from_findings(findings_warn) == 0
     assert lint_mod.exit_code_from_findings([]) == 0
+
+
+# ── Phase 2.1: canonical index includes source + root pages ────────────────
+
+def test_canonical_index_includes_source_pages(tmp_path, lint_mod):
+    wiki = tmp_path / "wiki"
+    (wiki / "sources").mkdir(parents=True)
+    (wiki / "sources" / "MySource.md").write_text("---\ntype: source\nsource_url: x\n---\n", encoding="utf-8")
+    (wiki / "companies").mkdir()
+    (wiki / "companies" / "Entity.md").write_text("---\ntype: company\naliases_en: [Entity]\naliases_cn: []\n---\nReferences [[MySource]].\n", encoding="utf-8")
+    findings = lint_mod.check_broken_wikilinks(wiki)
+    # [[MySource]] should resolve to the source page stem, not flag as broken
+    assert not any(f.check == "broken-wikilink" and "MySource" in f.message for f in findings)
+
+
+def test_canonical_index_includes_root_pages(tmp_path, lint_mod):
+    wiki = tmp_path / "wiki"
+    (wiki / "companies").mkdir(parents=True)
+    (wiki / "index.md").write_text("# Index\n", encoding="utf-8")
+    (wiki / "companies" / "Entity.md").write_text("---\ntype: company\naliases_en: [Entity]\naliases_cn: []\n---\nSee [[index]].\n", encoding="utf-8")
+    findings = lint_mod.check_broken_wikilinks(wiki)
+    assert not any(f.check == "broken-wikilink" and "[[index]]" in f.message for f in findings)
