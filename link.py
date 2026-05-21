@@ -49,13 +49,17 @@ def _import_lint():
 
 
 def _result_to_dict(result) -> dict:
-    return {
+    out = {
         "source": result.source,
         "extracted_at": result.extracted_at,
         "manifest_sha": result.manifest_sha,
         "entities": [dataclasses.asdict(e) for e in result.entities],
         "disambiguation_warnings": result.disambiguation_warnings,
     }
+    if result.vector_entities is not None:
+        out["vector_entities"] = [dataclasses.asdict(h) for h in result.vector_entities]
+        out["vector_manifest_sha"] = result.vector_manifest_sha
+    return out
 
 
 def run_single(
@@ -66,6 +70,10 @@ def run_single(
     dry_run: bool = False,
     force: bool = False,
     verbose: bool = False,
+    vector: bool = False,
+    top_k: int = 20,
+    threshold: float | None = None,
+    rebuild_embeddings: bool = False,
 ) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / (raw_path.stem + ".json")
@@ -88,10 +96,22 @@ def run_single(
         raw_path, automaton, manifest_sha, _DISAMBIG_YAML
     )
 
+    if vector:
+        stage2 = _import_module("stage2")
+        embeddings, canonicals = stage2.build_entity_embeddings(wiki_root, force=rebuild_embeddings)
+        vector_hits = stage2.run_for_source(raw_path, embeddings, canonicals, top_k=top_k, threshold=threshold)
+        result.vector_entities = vector_hits
+        result.vector_manifest_sha = stage2.manifest_sha()
+
     summary = f"extract | {raw_path.name} | entities: {len(result.entities)} | warnings: {len(result.disambiguation_warnings)}"
+    if vector:
+        summary += f" | vector: {len(result.vector_entities) if result.vector_entities else 0}"
     if verbose:
         for e in result.entities:
             print(f"  {e.canonical} ({e.count}x) via {e.aliases_matched}")
+        if result.vector_entities:
+            for h in result.vector_entities:
+                print(f"  [vector] {h.canonical} cosine={h.cosine:.3f} rank={h.rank}")
 
     if dry_run:
         print(summary)
@@ -317,6 +337,10 @@ def main() -> None:
     parser.add_argument("--context", type=int, default=30, help="Context chars around each hit")
     parser.add_argument("--severity", default=None, choices=["CRITICAL", "WARN", "INFO"],
                         help="Filter lint output to a single severity level")
+    parser.add_argument("--vector", action="store_true", help="Enable Stage 2 BGE-M3 vector retrieval")
+    parser.add_argument("--top-k", type=int, default=20, help="Stage 2 top-K (default 20)")
+    parser.add_argument("--threshold", type=float, default=None, help="Stage 2 cosine threshold filter")
+    parser.add_argument("--rebuild-embeddings", action="store_true", help="Force re-embed entity matrix")
     args = parser.parse_args()
 
     if args.command == "lint":
@@ -338,9 +362,17 @@ def main() -> None:
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():
-            print(f"ERROR: file not found: {raw_path}", file=sys.stderr)
-            sys.exit(1)
-        run_single(raw_path, dry_run=args.dry_run, force=args.force, verbose=args.verbose)
+            print(f"ERROR: file not found: {raw_path}", file=sys.stderr); sys.exit(1)
+        run_single(
+            raw_path,
+            dry_run=args.dry_run,
+            force=args.force,
+            verbose=args.verbose,
+            vector=args.vector,
+            top_k=args.top_k,
+            threshold=args.threshold,
+            rebuild_embeddings=args.rebuild_embeddings,
+        )
 
 
 if __name__ == "__main__":

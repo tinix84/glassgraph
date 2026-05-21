@@ -151,3 +151,68 @@ def test_run_backfill_writes_report_file(wiki_dir, tmp_path):
     )
     assert report_path.exists()
     assert "# Backfill Audit" in report_path.read_text(encoding="utf-8")
+
+
+# ── --vector flag ───────────────────────────────────────────────────────────
+
+def test_run_single_without_vector_omits_vector_fields(wiki_dir, tmp_path):
+    raw_file = _make_raw_file(tmp_path, "test.md", "Tesla and BYD.")
+    link = _load_link()
+    cache_dir = tmp_path / "cache"
+    link.run_single(
+        raw_path=raw_file,
+        wiki_root=wiki_dir,
+        index_dir=tmp_path / "index",
+        cache_dir=cache_dir,
+        dry_run=False,
+        force=False,
+        verbose=False,
+    )
+    data = json.loads((cache_dir / "test.json").read_text(encoding="utf-8"))
+    assert "vector_entities" not in data
+    assert "vector_manifest_sha" not in data
+
+
+def test_run_single_with_vector_includes_vector_entities(wiki_dir, tmp_path, monkeypatch):
+    """Mock stage2.run_for_source to avoid loading the real model."""
+    raw_file = _make_raw_file(tmp_path, "test.md", "Tesla and BYD.")
+    link = _load_link()
+
+    # Patch stage2 functions via the module-level cache
+    import importlib.util
+    src = Path(__file__).resolve().parents[1] / "stage2.py"
+    spec = importlib.util.spec_from_file_location("stage2", src)
+    stage2_mod = importlib.util.module_from_spec(spec)
+    sys.modules["stage2"] = stage2_mod
+    spec.loader.exec_module(stage2_mod)
+
+    fake_hits = [
+        stage2_mod.VectorHit(canonical="Tesla", cosine=0.9, rank=1),
+        stage2_mod.VectorHit(canonical="BYD", cosine=0.8, rank=2),
+    ]
+    monkeypatch.setattr(stage2_mod, "run_for_source", lambda *a, **kw: fake_hits)
+    import numpy as np
+    monkeypatch.setattr(stage2_mod, "build_entity_embeddings", lambda *a, **kw: (np.zeros((2, 4)), ["Tesla", "BYD"]))
+    monkeypatch.setattr(stage2_mod, "manifest_sha", lambda *a, **kw: "fake_sha")
+
+    cache_dir = tmp_path / "cache"
+    link.run_single(
+        raw_path=raw_file,
+        wiki_root=wiki_dir,
+        index_dir=tmp_path / "index",
+        cache_dir=cache_dir,
+        dry_run=False,
+        force=False,
+        verbose=False,
+        vector=True,
+        top_k=20,
+        threshold=None,
+    )
+    data = json.loads((cache_dir / "test.json").read_text(encoding="utf-8"))
+    assert "vector_entities" in data
+    assert len(data["vector_entities"]) == 2
+    assert data["vector_entities"][0]["canonical"] == "Tesla"
+    assert data["vector_entities"][0]["cosine"] == 0.9
+    assert data["vector_entities"][0]["rank"] == 1
+    assert data["vector_entities"][0]["confidence"] == "vector"
+    assert data["vector_manifest_sha"] == "fake_sha"
