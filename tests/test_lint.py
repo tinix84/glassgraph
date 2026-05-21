@@ -168,6 +168,54 @@ def test_empty_aliases_merged_ok(tmp_path, lint_mod):
     assert findings == []
 
 
+# ── Check 8: aliases-drift ─────────────────────────────────────────────────
+
+def test_aliases_drift_catches_term_in_union_not_in_en_cn(tmp_path, lint_mod):
+    p = tmp_path / "wiki" / "companies" / "X.md"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        "---\ntype: company\n"
+        "aliases: [X, X-corp, drifted-term]\n"
+        "aliases_en: [X, X-corp]\n"
+        "aliases_cn: []\n---\n",
+        encoding="utf-8",
+    )
+    findings = lint_mod.check_aliases_drift(tmp_path / "wiki")
+    assert len(findings) == 1
+    assert findings[0].check == "aliases-drift"
+    assert findings[0].severity == "WARN"
+    assert "drifted-term" in findings[0].message
+
+
+def test_aliases_drift_no_drift_passes(tmp_path, lint_mod):
+    p = tmp_path / "wiki" / "companies" / "X.md"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        "---\ntype: company\n"
+        "aliases: [X, X-corp]\n"
+        "aliases_en: [X, X-corp]\n"
+        "aliases_cn: []\n---\n",
+        encoding="utf-8",
+    )
+    findings = lint_mod.check_aliases_drift(tmp_path / "wiki")
+    assert findings == []
+
+
+def test_aliases_drift_merged_skipped(tmp_path, lint_mod):
+    p = tmp_path / "wiki" / "companies" / "X.md"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        "---\ntype: company\n"
+        "aliases: [X, drifted-term]\n"
+        "aliases_en: [X]\n"
+        "aliases_cn: []\n"
+        "tags: [merged]\n---\n",
+        encoding="utf-8",
+    )
+    findings = lint_mod.check_aliases_drift(tmp_path / "wiki")
+    assert findings == []
+
+
 # ── Aggregator ─────────────────────────────────────────────────────────────
 
 def test_run_lint_returns_all_findings(tmp_path, lint_mod):

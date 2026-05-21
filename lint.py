@@ -304,6 +304,41 @@ def check_empty_aliases_non_merged(wiki_root: Path) -> list[LintFinding]:
     return findings
 
 
+# ── Check 8: aliases-drift ──────────────────────────────────────────────────
+
+def check_aliases_drift(wiki_root: Path) -> list[LintFinding]:
+    """Detect pages where `aliases:` (Obsidian union) has terms not in `aliases_en` ∪ `aliases_cn`.
+
+    Such terms are invisible to Stage 1 (which reads only the language-specific
+    fields) — a silent matching gap. The fix is to promote each drifted term
+    into `aliases_en` (if Latin) or `aliases_cn` (if CJK).
+    """
+    findings = []
+    for page in _entity_pages(wiki_root):
+        fm, _ = _read_frontmatter(page)
+        if not fm:
+            continue
+        if "merged" in (fm.get("tags") or []):
+            continue
+
+        def _coerce(val):
+            if not val:
+                return []
+            return [val] if isinstance(val, str) else list(val)
+
+        aliases_union = set(_coerce(fm.get("aliases")))
+        aliases_en = set(_coerce(fm.get("aliases_en")))
+        aliases_cn = set(_coerce(fm.get("aliases_cn")))
+        drift = aliases_union - (aliases_en | aliases_cn)
+        if drift:
+            findings.append(LintFinding(
+                severity="WARN", check="aliases-drift",
+                file=page, line=None,
+                message=f"aliases: has {len(drift)} term(s) not in aliases_en/cn: {sorted(drift)[:5]}",
+            ))
+    return findings
+
+
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
 def run_lint(wiki_root: Path) -> list[LintFinding]:
@@ -317,6 +352,7 @@ def run_lint(wiki_root: Path) -> list[LintFinding]:
     findings.extend(check_missing_required_fields(wiki_root))
     findings.extend(check_touches_orphans(wiki_root))
     findings.extend(check_empty_aliases_non_merged(wiki_root))
+    findings.extend(check_aliases_drift(wiki_root))
     findings.sort(key=lambda f: (_SEVERITY_ORDER[f.severity], str(f.file), f.line or 0))
     return findings
 
