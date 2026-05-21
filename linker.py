@@ -151,12 +151,23 @@ class EntityHit:
 
 
 @dataclass
+class VectorHit:
+    """A Stage 2 (BGE-M3) match — semantic similarity to an entity page."""
+    canonical: str
+    cosine: float
+    rank: int
+    confidence: str = "vector"
+
+
+@dataclass
 class ExtractionResult:
     source: str
     extracted_at: str
     manifest_sha: str
     entities: list[EntityHit]
     disambiguation_warnings: list[str]
+    vector_entities: list[VectorHit] | None = None
+    vector_manifest_sha: str | None = None
 
 
 def build_result(

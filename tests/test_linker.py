@@ -166,3 +166,33 @@ def test_cjk_regression_fixture(linker_mod, index_mod):
     found = {h[2] for h in hits}
     missing = set(expected) - found
     assert not missing, f"Regression: Stage 1 missed expected entities: {missing}"
+
+
+# ── VectorHit + ExtractionResult.vector_entities ────────────────────────────
+
+def test_vector_hit_has_required_fields(linker_mod):
+    h = linker_mod.VectorHit(canonical="Tesla", cosine=0.85, rank=1)
+    assert h.canonical == "Tesla"
+    assert h.cosine == 0.85
+    assert h.rank == 1
+    assert h.confidence == "vector"
+
+
+def test_extraction_result_vector_entities_defaults_none(linker_mod, wiki_dir, tmp_path, index_mod):
+    automaton = index_mod.build_index(wiki_dir, tmp_path / "m.json", tmp_path / "a.json")
+    body = "Tesla and BYD."
+    hits, warnings = linker_mod.extract(body, automaton)
+    result = linker_mod.build_result("raw/X.md", "sha", hits, warnings)
+    assert result.vector_entities is None
+    assert result.vector_manifest_sha is None
+
+
+def test_extraction_result_can_carry_vector_entities(linker_mod, wiki_dir, tmp_path, index_mod):
+    automaton = index_mod.build_index(wiki_dir, tmp_path / "m.json", tmp_path / "a.json")
+    hits, warnings = linker_mod.extract("Tesla", automaton)
+    result = linker_mod.build_result("raw/X.md", "sha", hits, warnings)
+    # Attach Stage 2 results manually (Task 3 will wire this via link.py)
+    result.vector_entities = [linker_mod.VectorHit(canonical="Tesla", cosine=0.9, rank=1)]
+    result.vector_manifest_sha = "vector_sha"
+    assert result.vector_entities[0].canonical == "Tesla"
+    assert result.vector_manifest_sha == "vector_sha"
