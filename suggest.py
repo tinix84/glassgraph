@@ -7,6 +7,7 @@ list for manual triage.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -112,20 +113,52 @@ def rank_candidates(
     return ranked[:top_n]
 
 
+def _source_shas(sources_dir: Path) -> dict[str, str]:
+    """SHA256 of every source file, keyed by relative filename."""
+    if not sources_dir.exists():
+        return {}
+    out = {}
+    for src in sorted(sources_dir.glob("*.md")):
+        out[src.name] = hashlib.sha256(src.read_bytes()).hexdigest()
+    return out
+
+
 def load_or_build_df(
     sources_dir: Path,
     cache_path: Path,
     force: bool = False,
 ) -> dict[str, int]:
-    """Load DF cache from JSON; rebuild if missing or stale."""
+    """Load DF cache from JSON; rebuild if missing, forced, or source SHAs changed.
+
+    Cache schema:
+        {"sources_sha": {filename: sha256, ...}, "df": {token: count, ...}}
+
+    Old plain-DF caches (no wrapper) are treated as stale and rebuilt.
+    """
+    current_shas = _source_shas(sources_dir)
+
     if cache_path.exists() and not force:
         try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(cached, dict)
+                and "sources_sha" in cached
+                and "df" in cached
+                and cached["sources_sha"] == current_shas
+            ):
+                return cached["df"]
         except (json.JSONDecodeError, OSError):
             pass
+
     df = compute_df_index(sources_dir)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(df, ensure_ascii=False, indent=2), encoding="utf-8")
+    cache_path.write_text(
+        json.dumps(
+            {"sources_sha": current_shas, "df": df},
+            ensure_ascii=False, indent=2,
+        ),
+        encoding="utf-8",
+    )
     return df
 
 
