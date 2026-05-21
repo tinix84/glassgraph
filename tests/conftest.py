@@ -107,6 +107,11 @@ def history_mod():
     return _load("history")
 
 
+@pytest.fixture(scope="session")
+def stage2_mod():
+    return _load("stage2")
+
+
 @pytest.fixture
 def disambiguation_yaml(tmp_path):
     path = tmp_path / "disambiguation.yaml"
