@@ -253,3 +253,26 @@ def test_run_for_source_applies_threshold(tmp_path, stage2_mod, monkeypatch):
     # high threshold should suppress everything from the fake encoder
     hits = stage2_mod.run_for_source(raw, embs, canonicals, top_k=20, threshold=0.99)
     assert hits == []
+
+
+# ── Layer 3: real model determinism (opt-in) ────────────────────────────────
+
+@pytest.mark.skipif(
+    not os.environ.get("RUN_BGE_M3_TESTS"),
+    reason="set RUN_BGE_M3_TESTS=1 to enable (downloads ~2GB BGE-M3 model)",
+)
+def test_determinism_real_model_two_runs_identical(tmp_path, stage2_mod):
+    """Embed a 3-page synthetic wiki twice; assert byte-identical .npy output."""
+    wiki = tmp_path / "wiki"
+    (wiki / "companies").mkdir(parents=True)
+    (wiki / "companies" / "Tesla.md").write_text("---\ntype: company\n---\nElectric vehicle manufacturer.\n", encoding="utf-8")
+    (wiki / "companies" / "BYD.md").write_text("---\ntype: company\n---\nChinese EV and battery manufacturer.\n", encoding="utf-8")
+    (wiki / "companies" / "Huawei.md").write_text("---\ntype: company\n---\nTelecom and power electronics.\n", encoding="utf-8")
+    # Use distinct paths so the cache check doesn't short-circuit
+    embs_a, _ = stage2_mod.build_entity_embeddings(
+        wiki, tmp_path / "a.npy", tmp_path / "ma.json", tmp_path / "ca.json", force=True
+    )
+    embs_b, _ = stage2_mod.build_entity_embeddings(
+        wiki, tmp_path / "b.npy", tmp_path / "mb.json", tmp_path / "cb.json", force=True
+    )
+    np.testing.assert_array_equal(embs_a, embs_b)
