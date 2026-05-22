@@ -47,7 +47,34 @@ explain.py       Per-source debug view (every hit + span + context)
 suggest.py       Alias candidate proposer (TF/DF on raw bodies)
 lint.py          8 defensive lints on wiki YAML, alias collisions, broken wikilinks, etc.
 history.py       Append-only backfill history with per-run deltas
+
+comparison/      Head-to-head comparison framework vs graphify
+  load_graphify.py     Defensive parser for graphify graph.json
+  load_ours.py         Parse wiki/sources/touches: into networkx DiGraph
+  metrics.py           P/R/F1, Jaccard, graph summaries, name normalization
+  compare.py           CLI orchestrator → markdown report
+
+docs/            Long-form journey writeup (mkdocs Material site)
+  01-origin.md         Part 1 — Why a personal LLM wiki
+  02-obsidian-substrate.md   Part 2 — Obsidian as substrate
+  03-wiki-llm.md             Part 3 — The wiki LLM
+  04-python-lint.md          Part 4 — When LLM curation fails (lint)
+  05-stage1-aho-corasick.md  Part 5 — Stage 1 entity linking
+  06-stage2-bge-m3.md        Part 6 — Stage 2 dense retrieval
+  07-graphify-comparison.md  Part 7 — The graphify comparison
+  08-whats-next.md           Part 8 — RAG, DB, and beyond
 ```
+
+## Documentation site
+
+The `docs/` folder is an [mkdocs Material](https://squidfunk.github.io/mkdocs-material/) site. Preview locally:
+
+```bash
+pip install -r docs/requirements.txt
+mkdocs serve   # → http://localhost:8000
+```
+
+It contains an eight-part journey article describing how this project came to exist, from the original personal-knowledge-management problem through the graphify head-to-head benchmark.
 
 Wiki schema assumed: pages under `wiki/{companies,technologies,products,themes}/*.md` each with frontmatter:
 

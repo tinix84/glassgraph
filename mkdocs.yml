@@ -1,0 +1,61 @@
+site_name: glassgraph
+site_description: A deterministic entity linker for personal research wikis — and the journey of building one
+site_author: Riccardo Tinivella
+site_url: https://tinix84.github.io/glassgraph/
+repo_url: https://github.com/tinix84/glassgraph
+repo_name: tinix84/glassgraph
+copyright: "Copyright &copy; 2026 Riccardo Tinivella"
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.integrate
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+nav:
+  - Home: index.md
+  - Journey:
+      - "1. Why a personal LLM wiki": 01-origin.md
+      - "2. Obsidian as substrate": 02-obsidian-substrate.md
+      - "3. The wiki LLM": 03-wiki-llm.md
+      - "4. When LLM curation fails — Python lint": 04-python-lint.md
+      - "5. Stage 1 — Aho-Corasick entity linking": 05-stage1-aho-corasick.md
+      - "6. Stage 2 — BGE-M3 dense retrieval": 06-stage2-bge-m3.md
+      - "7. The graphify comparison": 07-graphify-comparison.md
+      - "8. What's next — RAG, DB, and beyond": 08-whats-next.md
+  - About: about.md
