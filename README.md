@@ -1,0 +1,75 @@
+# glassgraph
+
+Deterministic entity linker and graph builder for personal research wikis.
+
+## What it does
+
+Given a folder of markdown files and a wiki of entity pages (each carrying an `aliases:` frontmatter list), glassgraph extracts entity mentions and builds a source-to-entity graph with no LLM in the loop.
+
+- **Stage 1** — Aho-Corasick literal matching against a dictionary of aliases. CJK-boundary aware. ~1s on 500 files.
+- **Stage 2** *(opt-in)* — BGE-M3 dense semantic retrieval over entity page bodies. Surfaces candidate entities not in the alias dictionary. CPU-only, deterministic with `torch.manual_seed(0)` + `CUBLAS_WORKSPACE_CONFIG=:16:8`. ~3-5 min on 500 files first run, sub-second on cached reruns.
+
+Every match is byte-reproducible: same inputs → byte-identical extraction cache and embedding manifest.
+
+## Why this exists
+
+LLM-based knowledge-graph extractors are powerful but expensive, non-deterministic, and produce edges of varying confidence that are hard to audit. glassgraph is the opposite trade-off: fully deterministic, free to run, with an explicit dictionary of aliases you control. Every hit has a span + alias + canonical trace; nothing is inferred.
+
+It's not a replacement for tools like [graphify](https://github.com/safishamsi/graphify) — it's the right tool when:
+
+- Your domain has a curated entity vocabulary (companies, products, technologies)
+- You want byte-reproducible re-runs for diffing and version control
+- You can't or don't want to pay LLM API costs at corpus scale
+- Audit trail matters more than discovering novel inferred connections
+
+If you want first-class community detection, INFERRED edges, or semantic clustering surfaced without an alias dictionary — use graphify or a similar LLM-based tool.
+
+## Quick start
+
+```bash
+pip install pyahocorasick networkx pyyaml sentence-transformers torch
+python link.py path/to/source.md
+```
+
+Outputs `.tools/extraction-cache/{stem}.json` with `entities` (Stage 1 hits) and optionally `vector_entities` (Stage 2 hits, with `--vector`).
+
+See `python link.py --help` for the full command list (extract, backfill, lint, explain, suggest, history).
+
+## Architecture
+
+```
+link.py          CLI entry — extract / backfill / lint / explain / suggest / history
+linker.py        Aho-Corasick scan + dedup + disambiguation (Stage 1)
+stage2.py        BGE-M3 embedding + cosine retrieval (Stage 2, opt-in)
+index.py         Build alias manifest + Aho-Corasick automaton from wiki/
+graph.py         touches: → networkx DiGraph (source ↔ entity)
+explain.py       Per-source debug view (every hit + span + context)
+suggest.py       Alias candidate proposer (TF/DF on raw bodies)
+lint.py          8 defensive lints on wiki YAML, alias collisions, broken wikilinks, etc.
+history.py       Append-only backfill history with per-run deltas
+```
+
+Wiki schema assumed: pages under `wiki/{companies,technologies,products,themes}/*.md` each with frontmatter:
+
+```yaml
+---
+type: company | technology | product | theme
+aliases: [...]      # union of aliases_en + aliases_cn
+aliases_en: [...]
+aliases_cn: [...]
+---
+```
+
+Source pages under `wiki/sources/*.md` carry a `touches: ['[[Entity]]', ...]` frontmatter field that builds the graph.
+
+## Status
+
+**Experimental / personal-research origin.** Built for one corpus (power-electronics & EV powertrain research clippings). Battle-tested on ~500 sources with ~1400 entity pages. Not packaged, not pip-installable, no semver guarantees. The CLI surface is stable but the internal API is not.
+
+## Inspiration & acknowledgements
+
+The output structure (god nodes / surprising connections / suggested questions in `GRAPH_REPORT.md`) is borrowed from [graphify](https://github.com/safishamsi/graphify), which inspired the comparison this tool emerged from. graphify's LLM-based approach and glassgraph's deterministic approach are complementary, not adversarial — different points on the same trade-off curve.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

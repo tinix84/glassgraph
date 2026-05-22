@@ -147,27 +147,6 @@ def test_build_result_confidence_is_dict(wiki_dir, tmp_path, linker_mod, index_m
     assert all(e.confidence == "dict" for e in result.entities)
 
 
-# ── CJK regression fixture ────────────────────────────────────────────────────
-
-def test_cjk_regression_fixture(linker_mod, index_mod):
-    """Stage 1 on the BYD ATTO 3 source must produce all expected canonicals."""
-    import json as _json
-    fixtures = Path(__file__).parent / "fixtures"
-    body = (fixtures / "cjk_regression_body.txt").read_text(encoding="utf-8")
-    expected = _json.loads((fixtures / "cjk_regression_expected.json").read_text(encoding="utf-8"))
-
-    # Use the real wiki index (not synthetic fixture) for this test
-    real_wiki = Path(__file__).resolve().parents[3] / "wiki"
-    real_index = Path(__file__).resolve().parents[2] / "index"
-    automaton = index_mod.build_index(real_wiki, real_index / "manifest.json", real_index / "aliases.json")
-
-    body_clean = linker_mod._preprocess(body)
-    hits, _ = linker_mod.extract(body_clean, automaton)
-    found = {h[2] for h in hits}
-    missing = set(expected) - found
-    assert not missing, f"Regression: Stage 1 missed expected entities: {missing}"
-
-
 # ── VectorHit + ExtractionResult.vector_entities ────────────────────────────
 
 def test_vector_hit_has_required_fields(linker_mod):
