@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 *.egg-info/
+
+# mkdocs build output (deployed via gh-deploy to gh-pages branch)
+site/
