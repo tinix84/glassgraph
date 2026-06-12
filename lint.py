@@ -6,14 +6,25 @@ when any CRITICAL finding present.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+
+def _load_frontmatter():
+    import importlib.util, sys
+    from pathlib import Path
+    if "frontmatter" in sys.modules:
+        return sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = importlib.util.spec_from_file_location("frontmatter", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
-_WIKILINK_RE = re.compile(r"\[\[([^\[\]\|]+?)(?:\|[^\[\]]+)?\]\]")
+frontmatter = _load_frontmatter()
+_WIKILINK_RE = frontmatter.WIKILINK_RE
 _SEVERITY_ORDER = {"CRITICAL": 0, "WARN": 1, "INFO": 2}
 _ENTITY_DIRS = ("companies", "technologies", "products", "themes")
 
@@ -30,25 +41,14 @@ class LintFinding:
 # ── frontmatter helpers ─────────────────────────────────────────────────────
 
 def _read_frontmatter(path: Path) -> tuple[dict | None, str | None]:
-    """Return (frontmatter_dict, raw_fm_text) or (None, None) if no frontmatter / parse fails.
-
-    Distinguishes 'no frontmatter' (returns None, None) from 'parse failure'
-    (returns None, raw_text) so callers can decide severity.
-    """
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
+    """Return (frontmatter_dict, raw_fm_text). (None, None) = no frontmatter;
+    (None, fm_text) = parse failure (caller decides severity)."""
+    p = frontmatter.parse_file(path)
+    if p.fm_text is None:
         return None, None
-    end = text.find("\n---", 3)
-    if end == -1:
-        return None, None
-    fm_text = text[3:end]
-    try:
-        fm = yaml.safe_load(fm_text)
-        if fm is None:
-            fm = {}
-        return fm, fm_text
-    except yaml.YAMLError:
-        return None, fm_text
+    if p.error:
+        return None, p.fm_text
+    return p.metadata, p.fm_text
 
 
 def _all_wiki_pages(wiki_root: Path) -> list[Path]:
@@ -117,25 +117,14 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
 def check_yaml_validity(pages: list[Path]) -> list[LintFinding]:
     findings = []
     for page in pages:
-        text = page.read_text(encoding="utf-8")
-        if not text.startswith("---"):
+        p = frontmatter.parse_file(page)
+        if p.fm_text is None and p.error is None:
             continue  # no frontmatter is fine
-        end = text.find("\n---", 3)
-        if end == -1:
+        if p.error:
             findings.append(LintFinding(
                 severity="CRITICAL", check="yaml-validity",
-                file=page, line=1,
-                message="frontmatter delimiter --- not closed",
-            ))
-            continue
-        try:
-            yaml.safe_load(text[3:end])
-        except yaml.YAMLError as e:
-            line = getattr(getattr(e, "problem_mark", None), "line", None)
-            findings.append(LintFinding(
-                severity="CRITICAL", check="yaml-validity",
-                file=page, line=(line + 1) if line is not None else None,
-                message=f"YAML parse error: {e}",
+                file=page, line=None,
+                message=f"YAML parse error: {p.error}",
             ))
     return findings
 

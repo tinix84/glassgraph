@@ -8,6 +8,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# Force UTF-8 stdout on Windows — fixes UnicodeEncodeError when printing CJK
+# filenames or canonicals. Safe no-op on systems where stdout already speaks UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 _HERE = Path(__file__).resolve().parent
 _TOOLS = _HERE.parent
 _WIKI_ROOT = _TOOLS.parent / "wiki"

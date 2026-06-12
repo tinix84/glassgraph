@@ -5,7 +5,22 @@ import re
 from pathlib import Path
 
 import networkx as nx
-import yaml
+
+
+def _load_frontmatter():
+    import importlib.util, sys
+    from pathlib import Path
+    if "frontmatter" in sys.modules:
+        return sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = importlib.util.spec_from_file_location("frontmatter", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+frontmatter = _load_frontmatter()
 
 _ENTITY_DIRS = ("companies", "technologies", "products", "themes")
 _WIKILINK_RE = re.compile(r"^\[\[(.+?)(\|.+?)?\]\]$")
@@ -19,15 +34,8 @@ def _strip_wikilink(entry: str) -> str:
 
 def _parse_touches(source_page: Path) -> list[str]:
     """Return list of bare canonical names from touches: frontmatter."""
-    text = source_page.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        return []
-    end = text.find("\n---", 3)
-    if end == -1:
-        return []
-    try:
-        fm = yaml.safe_load(text[3:end]) or {}
-    except yaml.YAMLError:
+    fm = frontmatter.parse_file(source_page).metadata
+    if not fm:
         return []
     raw = fm.get("touches") or []
     if isinstance(raw, str):

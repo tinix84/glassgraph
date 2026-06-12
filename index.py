@@ -9,7 +9,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import ahocorasick
-import yaml
+
+
+def _load_frontmatter():
+    import importlib.util, sys
+    from pathlib import Path
+    if "frontmatter" in sys.modules:
+        return sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = importlib.util.spec_from_file_location("frontmatter", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+frontmatter = _load_frontmatter()
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +60,10 @@ def _parse_aliases(page: Path) -> tuple[str, list[str]]:
     backwards-compatibility but should not appear in the Stage 1 trie.
     """
     canonical = page.stem
-    text = page.read_text(encoding="utf-8")
-    if not text.startswith("---"):
+    p = frontmatter.parse_file(page)
+    if p.metadata is None:
         return canonical, [canonical]
-    end = text.find("\n---", 3)
-    if end == -1:
-        return canonical, [canonical]
-    try:
-        fm = yaml.safe_load(text[3:end]) or {}
-    except yaml.YAMLError:
-        return canonical, [canonical]
-
+    fm = p.metadata
     tags = fm.get("tags") or []
     if isinstance(tags, str):
         tags = [tags]

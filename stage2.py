@@ -20,6 +20,22 @@ from pathlib import Path
 import numpy as np
 
 
+def _load_frontmatter():
+    import importlib.util, sys
+    from pathlib import Path
+    if "frontmatter" in sys.modules:
+        return sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = importlib.util.spec_from_file_location("frontmatter", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+frontmatter = _load_frontmatter()
+
+
 # Pin global state at module load
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":16:8")
 os.environ.setdefault("PYTHONHASHSEED", "0")
@@ -103,12 +119,8 @@ def _get_model_revision() -> str:
 
 def _strip_frontmatter_and_body(text: str) -> tuple[str, str]:
     """Return (frontmatter_text, body_text). Body has frontmatter stripped."""
-    if not text.startswith("---"):
-        return "", text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return "", text
-    return text[3:end], text[end + 4:]
+    p = frontmatter.parse(text)
+    return (p.fm_text or ""), p.body
 
 
 def _entity_pages(wiki_root: Path) -> list[Path]:

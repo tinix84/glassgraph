@@ -91,3 +91,23 @@ def test_parse_file_detects_bom(tmp_path):
 def test_wikilink_re_exported():
     m = _fm().WIKILINK_RE.search("see [[SiC-MOSFET|SiC]] here")
     assert m.group(1) == "SiC-MOSFET"
+
+
+def test_bom_page_aliases_still_parsed(tmp_path):
+    """index._parse_aliases must see frontmatter even when the file has a BOM."""
+    idx = _fm("index")
+    page = tmp_path / "Tesla.md"
+    page.write_bytes(b"\xef\xbb\xbf" + PAGE.encode("utf-8"))
+    canonical, aliases = idx._parse_aliases(page)
+    assert canonical == "Tesla"
+    assert "特斯拉" in aliases
+
+
+def test_bom_source_page_touches_still_in_graph(tmp_path):
+    graph = _fm("graph")
+    src_dir = tmp_path / "sources"
+    src_dir.mkdir()
+    text = "---\ntype: source\ntouches:\n  - \"[[Tesla]]\"\n---\nBody.\n"
+    (src_dir / "clip.md").write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+    G = graph.build_current_graph(src_dir)
+    assert G.has_edge("clip", "Tesla")

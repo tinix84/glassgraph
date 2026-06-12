@@ -29,18 +29,18 @@ def test_strip_fenced_ignores_nested_shorter_fence(linker_mod):
     assert result == ["outside"]
 
 
-# ── _strip_frontmatter ────────────────────────────────────────────────────────
+# ── _preprocess (frontmatter stripping) ──────────────────────────────────────
 
-def test_strip_frontmatter_removes_yaml(linker_mod):
+def test_preprocess_removes_frontmatter(linker_mod):
     text = "---\naliases: [Tesla]\n---\nBody text here"
-    result = linker_mod._strip_frontmatter(text)
+    result = linker_mod._preprocess(text)
     assert "Body text here" in result
     assert "aliases:" not in result
 
 
-def test_strip_frontmatter_noop_when_no_frontmatter(linker_mod):
+def test_preprocess_noop_when_no_frontmatter(linker_mod):
     text = "No frontmatter at all."
-    assert linker_mod._strip_frontmatter(text) == text
+    assert linker_mod._preprocess(text) == text
 
 
 # ── extract ───────────────────────────────────────────────────────────────────

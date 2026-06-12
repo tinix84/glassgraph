@@ -10,6 +10,22 @@ from typing import Iterator
 import ahocorasick
 import yaml
 
+
+def _load_frontmatter():
+    import importlib.util, sys
+    from pathlib import Path
+    if "frontmatter" in sys.modules:
+        return sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = importlib.util.spec_from_file_location("frontmatter", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+frontmatter = _load_frontmatter()
+
 # \W excludes underscore in Python's Unicode mode; explicit _ makes underscore a boundary too
 _BOUNDARY_RE = re.compile(r"[\W_]", re.UNICODE)
 # CJK Unified Ideographs — boundary rules relaxed inside CJK runs
@@ -50,20 +66,10 @@ def strip_fenced(lines) -> Iterator[str]:
         yield line
 
 
-def _strip_frontmatter(text: str) -> str:
-    """Remove YAML frontmatter block from markdown text."""
-    if not text.startswith("---"):
-        return text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return text
-    return text[end + 4:]
-
-
 def _preprocess(text: str) -> str:
     """Strip frontmatter and fenced blocks; return plain string for scanning."""
-    text = _strip_frontmatter(text)
-    lines = text.splitlines()
+    body = frontmatter.parse(text).body
+    lines = body.splitlines()
     return "\n".join(strip_fenced(lines))
 
 
