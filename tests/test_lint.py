@@ -1,4 +1,4 @@
-"""Tests for lint.py — 7 defensive checks + LintFinding dataclass."""
+"""Tests for lint.py — 10 defensive checks + LintFinding dataclass."""
 from __future__ import annotations
 
 import textwrap
@@ -261,3 +261,44 @@ def test_canonical_index_includes_root_pages(tmp_path, lint_mod):
     (wiki / "companies" / "Entity.md").write_text("---\ntype: company\naliases_en: [Entity]\naliases_cn: []\n---\nSee [[index]].\n", encoding="utf-8")
     findings = lint_mod.check_broken_wikilinks(wiki)
     assert not any(f.check == "broken-wikilink" and "[[index]]" in f.message for f in findings)
+
+
+# ── Check 9: bom ───────────────────────────────────────────────────────────
+
+def test_check_bom_flags_bom_files(lint_mod, tmp_path):
+    d = tmp_path / "wiki" / "sources"
+    d.mkdir(parents=True)
+    good = d / "good.md"
+    good.write_text("---\ntype: source\n---\nBody.\n", encoding="utf-8")
+    bad = d / "bad.md"
+    bad.write_bytes(b"\xef\xbb\xbf---\ntype: source\n---\nBody.\n")
+    findings = lint_mod.check_bom([good, bad])
+    assert len(findings) == 1
+    assert findings[0].file == bad
+    assert findings[0].severity == "CRITICAL"
+
+
+# ── Check 10: duplicate-key ────────────────────────────────────────────────
+
+def test_check_duplicate_keys_flags_dupes(lint_mod, tmp_path):
+    d = tmp_path / "wiki" / "companies"
+    d.mkdir(parents=True)
+    bad = d / "Dup.md"
+    bad.write_text(
+        "---\ntype: company\nupdated: 2026-05-01\nupdated: 2026-06-07\n---\nBody.\n",
+        encoding="utf-8")
+    findings = lint_mod.check_duplicate_keys([bad])
+    assert len(findings) == 1
+    assert findings[0].severity == "CRITICAL"
+    assert "updated" in findings[0].message
+
+
+def test_run_lint_includes_new_checks(lint_mod, tmp_path):
+    wiki = tmp_path / "wiki"
+    (wiki / "companies").mkdir(parents=True)
+    bad = wiki / "companies" / "Dup.md"
+    bad.write_bytes(
+        b"\xef\xbb\xbf---\ntype: company\naliases_en: [Dup]\nupdated: 2026-05-01\nupdated: 2026-06-07\n---\nBody.\n")
+    findings = lint_mod.run_lint(wiki)
+    checks = {f.check for f in findings}
+    assert "bom" in checks and "duplicate-key" in checks

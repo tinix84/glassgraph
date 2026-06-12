@@ -1,4 +1,4 @@
-"""Defensive lints for the 2brain wiki — 7 checks aggregated into one report.
+"""Defensive lints for the 2brain wiki — 10 checks aggregated into one report.
 
 Each check is a pure function: (root_path) -> list[LintFinding]. Findings are
 sorted by severity (CRITICAL > WARN > INFO) then file path. Returns exit code 1
@@ -328,10 +328,42 @@ def check_aliases_drift(wiki_root: Path) -> list[LintFinding]:
     return findings
 
 
+# ── Check 9: bom ────────────────────────────────────────────────────────────
+
+def check_bom(pages: list[Path]) -> list[LintFinding]:
+    """UTF-8 BOM makes frontmatter invisible to plain utf-8 parsers."""
+    findings = []
+    for page in pages:
+        with page.open("rb") as f:
+            if f.read(3) == b"\xef\xbb\xbf":
+                findings.append(LintFinding(
+                    severity="CRITICAL", check="bom",
+                    file=page, line=1,
+                    message="file starts with a UTF-8 BOM — strip it (.tools/maintenance/strip_bom.py)",
+                ))
+    return findings
+
+
+# ── Check 10: duplicate-key ─────────────────────────────────────────────────
+
+def check_duplicate_keys(pages: list[Path]) -> list[LintFinding]:
+    """Duplicate top-level frontmatter keys — YAML keeps the last silently."""
+    findings = []
+    for page in pages:
+        p = frontmatter.parse_file(page)
+        if p.duplicate_keys:
+            findings.append(LintFinding(
+                severity="CRITICAL", check="duplicate-key",
+                file=page, line=None,
+                message=f"duplicate frontmatter key(s): {p.duplicate_keys}",
+            ))
+    return findings
+
+
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
 def run_lint(wiki_root: Path) -> list[LintFinding]:
-    """Run all 7 checks and return findings sorted by severity then file."""
+    """Run all 10 checks and return findings sorted by severity then file."""
     all_pages = _all_wiki_pages(wiki_root)
     findings: list[LintFinding] = []
     findings.extend(check_yaml_validity(all_pages))
@@ -342,6 +374,8 @@ def run_lint(wiki_root: Path) -> list[LintFinding]:
     findings.extend(check_touches_orphans(wiki_root))
     findings.extend(check_empty_aliases_non_merged(wiki_root))
     findings.extend(check_aliases_drift(wiki_root))
+    findings.extend(check_bom(all_pages))
+    findings.extend(check_duplicate_keys(all_pages))
     findings.sort(key=lambda f: (_SEVERITY_ORDER[f.severity], str(f.file), f.line or 0))
     return findings
 
