@@ -37,8 +37,14 @@ def _is_cjk(s: str) -> bool:
 
 
 def _is_boundary(ch: str) -> bool:
-    """True if ch is a word-boundary character (or empty = start/end of string)."""
+    """True if ch is a word-boundary character (or empty = start/end of string).
+
+    CJK ideographs count as boundaries: Chinese prose embeds Latin terms with
+    no spaces (用SiC器件), so a CJK neighbor must not block a Latin-edge match.
+    """
     if not ch:
+        return True
+    if _CJK_RE.match(ch):
         return True
     return bool(_BOUNDARY_RE.match(ch))
 
@@ -105,14 +111,14 @@ def extract(
     raw: list[tuple[int, int, str, str]] = []
     for end_idx, (canonical, alias) in automaton.iter(body):
         start_idx = end_idx - len(alias) + 1
-        if _is_cjk(alias):
-            # CJK aliases: no whitespace boundary needed
+        before = body[start_idx - 1] if start_idx > 0 else ""
+        after = body[end_idx + 1] if end_idx + 1 < len(body) else ""
+        # Per-edge boundary: a CJK edge of the alias needs no boundary; a
+        # Latin edge needs a boundary char (CJK neighbors count as boundaries).
+        ok_before = bool(_CJK_RE.match(alias[0])) or _is_boundary(before)
+        ok_after = bool(_CJK_RE.match(alias[-1])) or _is_boundary(after)
+        if ok_before and ok_after:
             raw.append((start_idx, end_idx, canonical, alias))
-        else:
-            before = body[start_idx - 1] if start_idx > 0 else ""
-            after = body[end_idx + 1] if end_idx + 1 < len(body) else ""
-            if _is_boundary(before) and _is_boundary(after):
-                raw.append((start_idx, end_idx, canonical, alias))
 
     # 2. Greedy sweep: leftmost first, longest first (end is inclusive, so length = end-start+1; offset doesn't affect sort order)
     raw.sort(key=lambda x: (x[0], -(x[1] - x[0])))

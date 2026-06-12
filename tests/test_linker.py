@@ -175,3 +175,41 @@ def test_extraction_result_can_carry_vector_entities(linker_mod, wiki_dir, tmp_p
     result.vector_manifest_sha = "vector_sha"
     assert result.vector_entities[0].canonical == "Tesla"
     assert result.vector_manifest_sha == "vector_sha"
+
+
+# ── CJK boundary fix (Task 4) ─────────────────────────────────────────────────
+
+def test_latin_alias_adjacent_to_cjk_matches(linker_mod, index_mod, wiki_dir, tmp_path):
+    automaton = index_mod.build_index(
+        wiki_dir, tmp_path / "manifest.json", tmp_path / "aliases.json")
+    body = "使用SiC器件的特斯拉Tesla逆变器"
+    hits, _ = linker_mod.extract(body, automaton)
+    canonicals = {h[2] for h in hits}
+    assert "SiC-MOSFET" in canonicals   # 'SiC' alias, CJK on both sides
+    assert "Tesla" in canonicals        # 'Tesla' alias, CJK before, CJK after
+
+
+def test_mixed_alias_latin_tail_still_needs_boundary(linker_mod, index_mod, wiki_dir, tmp_path):
+    automaton = index_mod.build_index(
+        wiki_dir, tmp_path / "manifest.json", tmp_path / "aliases.json")
+    body = "采用碳化硅MOSFETs器件"
+    hits, _ = linker_mod.extract(body, automaton)
+    matched_aliases = {h[3] for h in hits}
+    assert "碳化硅MOSFET" not in matched_aliases  # Latin tail inside 'MOSFETs' — no
+    assert "碳化硅" in matched_aliases             # pure-CJK alias still matches
+
+
+def test_latin_alias_inside_latin_word_still_rejected(linker_mod, index_mod, wiki_dir, tmp_path):
+    automaton = index_mod.build_index(
+        wiki_dir, tmp_path / "manifest.json", tmp_path / "aliases.json")
+    hits, _ = linker_mod.extract("Teslas are cars", automaton)
+    assert all(h[2] != "Tesla" for h in hits)
+
+
+def test_stage1_matching_is_case_sensitive_by_contract(linker_mod, index_mod, wiki_dir, tmp_path):
+    """Contract: Stage 1 matches aliases byte-exact. 'tesla'/'TESLA' do not match
+    the 'Tesla' alias. Deliberate: protects short acronyms (SiC, GaN, PI)."""
+    automaton = index_mod.build_index(
+        wiki_dir, tmp_path / "manifest.json", tmp_path / "aliases.json")
+    hits, _ = linker_mod.extract("tesla and TESLA both appear", automaton)
+    assert hits == []
