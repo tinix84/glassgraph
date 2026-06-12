@@ -81,9 +81,19 @@ def test_run_single_writes_cache_file(wiki_dir, tmp_path):
 def test_run_single_skips_if_cache_exists(wiki_dir, tmp_path, capsys):
     raw_file = _make_raw_file(tmp_path, "test.md", "Tesla.")
     cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    (cache_dir / "test.json").write_text('{"skip": true}', encoding="utf-8")
     link = _load_link()
+    # First run: populates cache with a valid manifest_sha
+    link.run_single(
+        raw_path=raw_file,
+        wiki_root=wiki_dir,
+        index_dir=tmp_path / "index",
+        cache_dir=cache_dir,
+        dry_run=False,
+        force=False,
+        verbose=False,
+    )
+    capsys.readouterr()  # clear output from first run
+    # Second run: cache is fresh (sha matches) — must skip
     link.run_single(
         raw_path=raw_file,
         wiki_root=wiki_dir,
@@ -94,7 +104,7 @@ def test_run_single_skips_if_cache_exists(wiki_dir, tmp_path, capsys):
         verbose=False,
     )
     out = capsys.readouterr().out
-    assert "skip" in out.lower() or json.loads((cache_dir / "test.json").read_text())["skip"] is True
+    assert "skip" in out.lower()
 
 
 def test_run_single_force_overwrites_cache(wiki_dir, tmp_path):
@@ -171,6 +181,58 @@ def test_run_single_without_vector_omits_vector_fields(wiki_dir, tmp_path):
     data = json.loads((cache_dir / "test.json").read_text(encoding="utf-8"))
     assert "vector_entities" not in data
     assert "vector_manifest_sha" not in data
+
+
+def test_stale_cache_is_reextracted(wiki_dir, tmp_path, capsys):
+    """A cache whose manifest_sha no longer matches must be re-extracted, not skipped."""
+    link = _load_link()
+    raw = tmp_path / "raw" / "test.md"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text("Tesla uses SiC MOSFET.", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "test.json").write_text(
+        '{"manifest_sha": "0000000000000000", "entities": []}', encoding="utf-8")
+    link.run_single(raw, wiki_root=wiki_dir,
+                    index_dir=tmp_path / "index", cache_dir=cache_dir)
+    out = capsys.readouterr().out
+    assert "skip" not in out
+    data = json.loads((cache_dir / "test.json").read_text(encoding="utf-8"))
+    assert data["manifest_sha"] != "0000000000000000"
+    assert data["entities"]
+
+
+def test_fresh_cache_is_skipped(wiki_dir, tmp_path, capsys):
+    link = _load_link()
+    raw = tmp_path / "raw" / "test.md"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text("Tesla uses SiC MOSFET.", encoding="utf-8")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    link.run_single(raw, wiki_root=wiki_dir,
+                    index_dir=tmp_path / "index", cache_dir=cache_dir)  # populates
+    link.run_single(raw, wiki_root=wiki_dir,
+                    index_dir=tmp_path / "index", cache_dir=cache_dir)  # should skip
+    assert "skip (cached" in capsys.readouterr().out
+
+
+def test_sanity_gate_noninteractive_exits_nonzero(wiki_dir, tmp_path):
+    """Under a non-TTY stdin the gate must exit non-zero, not silently exit 0."""
+    import pytest
+    link = _load_link()
+    raw_dir = tmp_path / "raw"
+    sources_dir = tmp_path / "wiki_sources"
+    raw_dir.mkdir(); sources_dir.mkdir()
+    for i in range(11):
+        (raw_dir / f"s{i:02}.md").write_text("Tesla here.", encoding="utf-8")
+        (sources_dir / f"s{i:02}.md").write_text(
+            "---\ntype: source\nsource_url: x\ntouches: []\n---\nB.\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        link.run_backfill(
+            wiki_root=wiki_dir, raw_dir=raw_dir, sources_dir=sources_dir,
+            index_dir=tmp_path / "index", cache_dir=tmp_path / "cache",
+            report_path=tmp_path / "report.md", no_lint=True)
+    assert exc.value.code == 2
 
 
 def test_run_single_with_vector_includes_vector_entities(wiki_dir, tmp_path, monkeypatch):

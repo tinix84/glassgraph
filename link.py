@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import sys
 from datetime import date
@@ -85,10 +86,6 @@ def run_single(
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / (raw_path.stem + ".json")
 
-    if cache_file.exists() and not force:
-        print(f"skip (cached) | {raw_path.name}")
-        return
-
     index_mod = _import_index()
     linker_mod = _import_linker()
 
@@ -96,8 +93,16 @@ def run_single(
     aliases_path = index_dir / "aliases.json"
     automaton = index_mod.build_index(wiki_root, manifest_path, aliases_path)
 
-    import hashlib
-    manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()[:16]
+    manifest_sha = hashlib.sha256(aliases_path.read_bytes()).hexdigest()[:16]
+
+    if cache_file.exists() and not force:
+        try:
+            cached_sha = json.loads(cache_file.read_text(encoding="utf-8")).get("manifest_sha")
+        except (json.JSONDecodeError, OSError):
+            cached_sha = None
+        if cached_sha == manifest_sha:
+            print(f"skip (cached, fresh) | {raw_path.name}")
+            return
 
     result = linker_mod.extract_file(
         raw_path, automaton, manifest_sha, _DISAMBIG_YAML
@@ -237,8 +242,7 @@ def run_backfill(
     aliases_path = index_dir / "aliases.json"
     automaton = index_mod.build_index(wiki_root, manifest_path, aliases_path)
 
-    import hashlib
-    manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()[:16]
+    manifest_sha = hashlib.sha256(aliases_path.read_bytes()).hexdigest()[:16]
 
     source_pages = sorted(p for p in sources_dir.glob("*.md") if ".archive" not in str(p))
     stage1_results: dict[str, list[str]] = {}
@@ -253,15 +257,20 @@ def run_backfill(
         result = linker_mod.extract_file(raw_file, automaton, manifest_sha, _DISAMBIG_YAML)
         stage1_results[source_page.stem] = [e.canonical for e in result.entities]
 
-        if sanity_limit and i + 1 == sanity_limit:
+        if sanity_limit and len(stage1_results) == sanity_limit:
             print(f"\n--- Sanity gate: first {sanity_limit} sources ---")
             for stem, canonicals in stage1_results.items():
                 print(f"  {stem}: {canonicals}")
-            print("--- Continue? Run with --skip-sanity-gate to bypass. Ctrl-C to abort. ---")
+            if not sys.stdin.isatty():
+                print("Non-interactive session: rerun with --skip-sanity-gate to proceed.",
+                      file=sys.stderr)
+                sys.exit(2)
+            print("--- Continue? Enter to proceed, Ctrl-C to abort. ---")
             try:
                 input()
             except (EOFError, KeyboardInterrupt):
-                sys.exit(0)
+                sys.exit(2)
+            sanity_limit = None  # gate fires once
 
     G_current = graph_mod.build_current_graph(sources_dir)
     G_stage1 = graph_mod.build_stage1_graph(stage1_results)
