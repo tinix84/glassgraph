@@ -230,11 +230,11 @@ def run_lookup(
         print(f"NOT FOUND: '{name}' — no page or alias resolves to it")
         return 1
 
+    _type_name = {"companies": "company", "technologies": "technology", "products": "product", "themes": "theme"}
     for d in ("companies", "technologies", "products", "themes"):
         p = wiki_root / d / f"{canonical}.md"
         if p.exists():
-            type_name = "technology" if d == "technologies" else d[:-1]
-            print(f"{canonical} | {type_name} | {p}")
+            print(f"{canonical} | {_type_name[d]} | {p}")
             return 0
     print(f"{canonical} | (alias target, page file not located) |")
     return 0
