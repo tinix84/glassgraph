@@ -240,6 +240,30 @@ def run_lookup(
     return 0
 
 
+def run_cluster(
+    wiki_root: Path = _WIKI_ROOT,
+    cache_dir: Path = _CACHE_DIR,
+    min_sources: int = 5,
+    coverage: float = 0.6,
+) -> int:
+    """Surface entity co-occurrence clusters not yet covered by a theme.
+
+    Writes .tools/extraction-cache/cluster-report.md and prints a summary.
+    Pure measurement — no wiki writes, no LLM.
+    """
+    cluster_mod = _import_module("cluster")
+    from datetime import date
+    report = cluster_mod.render_report(
+        wiki_root, min_sources=min_sources, coverage=coverage,
+        date_str=date.today().isoformat())
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cache_dir / "cluster-report.md"
+    out_path.write_text(report, encoding="utf-8")
+    n = report.count("\n## Candidate")
+    print(f"cluster | uncovered candidates: {n} | report: {out_path}")
+    return 0
+
+
 def run_lint_cmd(
     wiki_root: Path = _WIKI_ROOT,
     severity_filter: str | None = None,
@@ -374,7 +398,7 @@ def run_backfill(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
-    parser.add_argument("command", help="'backfill' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
+    parser.add_argument("command", help="'backfill' | 'cluster' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
     parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
@@ -391,9 +415,15 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=20, help="Stage 2 top-K (default 20)")
     parser.add_argument("--threshold", type=float, default=None, help="Stage 2 cosine threshold filter")
     parser.add_argument("--rebuild-embeddings", action="store_true", help="Force re-embed entity matrix")
+    parser.add_argument("--min-sources", type=int, default=5,
+                        help="cluster: min shared sources for a co-occurrence link")
+    parser.add_argument("--coverage", type=float, default=0.6,
+                        help="cluster: drop candidates this fraction covered by a theme")
     args = parser.parse_args()
 
-    if args.command == "lint":
+    if args.command == "cluster":
+        sys.exit(run_cluster(min_sources=args.min_sources, coverage=args.coverage))
+    elif args.command == "lint":
         sys.exit(run_lint_cmd(severity_filter=args.severity))
     elif args.command == "backfill":
         aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint, with_history=args.history)
