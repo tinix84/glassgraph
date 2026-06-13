@@ -206,6 +206,40 @@ def run_suggest(
     print(suggest_mod.format_report(ranked))
 
 
+def run_lookup(
+    name: str,
+    wiki_root: Path = _WIKI_ROOT,
+    index_dir: Path = _INDEX_DIR,
+) -> int:
+    """Resolve a name/alias to its canonical page via the alias table.
+
+    Dedup check for invariant #3: prints 'canonical | type | path' or NOT FOUND.
+    Exit 0 = found, 1 = not found.
+    """
+    index_mod = _import_index()
+    manifest_path = index_dir / "manifest.json"
+    aliases_path = index_dir / "aliases.json"
+    index_mod.build_index(wiki_root, manifest_path, aliases_path)
+    alias_map = json.loads(aliases_path.read_text(encoding="utf-8"))
+
+    canonical = alias_map.get(name)
+    if canonical is None:
+        lower = {k.lower(): v for k, v in alias_map.items()}
+        canonical = lower.get(name.lower())
+    if canonical is None:
+        print(f"NOT FOUND: '{name}' — no page or alias resolves to it")
+        return 1
+
+    for d in ("companies", "technologies", "products", "themes"):
+        p = wiki_root / d / f"{canonical}.md"
+        if p.exists():
+            type_name = "technology" if d == "technologies" else d[:-1]
+            print(f"{canonical} | {type_name} | {p}")
+            return 0
+    print(f"{canonical} | (alias target, page file not located) |")
+    return 0
+
+
 def run_lint_cmd(
     wiki_root: Path = _WIKI_ROOT,
     severity_filter: str | None = None,
@@ -340,7 +374,7 @@ def run_backfill(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
-    parser.add_argument("command", help="'backfill' | 'lint' | 'explain' | 'suggest' | path to raw/*.md")
+    parser.add_argument("command", help="'backfill' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
     parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
@@ -375,6 +409,11 @@ def main() -> None:
             print("ERROR: suggest requires a raw file path", file=sys.stderr)
             sys.exit(1)
         run_suggest(Path(args.extra))
+    elif args.command == "lookup":
+        if args.extra is None:
+            print("ERROR: lookup requires a name", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(run_lookup(args.extra))
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():

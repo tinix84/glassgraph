@@ -1,4 +1,4 @@
-"""Defensive lints for the 2brain wiki — 10 checks aggregated into one report.
+"""Defensive lints for the 2brain wiki — 11 checks aggregated into one report.
 
 Each check is a pure function: (root_path) -> list[LintFinding]. Findings are
 sorted by severity (CRITICAL > WARN > INFO) then file path. Returns exit code 1
@@ -360,10 +360,35 @@ def check_duplicate_keys(pages: list[Path]) -> list[LintFinding]:
     return findings
 
 
+# ── Check 11: overview-stale ────────────────────────────────────────────────
+
+def check_overview_stale(wiki_root: Path, today: str | None = None) -> list[LintFinding]:
+    """overview.md `updated:` older than 30 days → INFO (curated thesis drifts)."""
+    import datetime
+    p = wiki_root / "overview.md"
+    if not p.exists():
+        return []
+    fm = _read_frontmatter(p)[0]
+    upd = (fm or {}).get("updated")
+    if not isinstance(upd, (str, datetime.date)):
+        return []
+    upd_s = upd.isoformat() if isinstance(upd, datetime.date) else upd
+    today = today or datetime.date.today().isoformat()
+    try:
+        d0 = datetime.date.fromisoformat(upd_s)
+        d1 = datetime.date.fromisoformat(today)
+    except ValueError:
+        return []
+    if (d1 - d0).days > 30:
+        return [LintFinding(severity="INFO", check="overview-stale", file=p, line=None,
+                            message=f"overview.md updated {upd_s}, >30 days old — refresh the thesis")]
+    return []
+
+
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
 def run_lint(wiki_root: Path) -> list[LintFinding]:
-    """Run all 10 checks and return findings sorted by severity then file."""
+    """Run all 11 checks and return findings sorted by severity then file."""
     all_pages = _all_wiki_pages(wiki_root)
     findings: list[LintFinding] = []
     findings.extend(check_yaml_validity(all_pages))
@@ -376,6 +401,7 @@ def run_lint(wiki_root: Path) -> list[LintFinding]:
     findings.extend(check_aliases_drift(wiki_root))
     findings.extend(check_bom(all_pages))
     findings.extend(check_duplicate_keys(all_pages))
+    findings.extend(check_overview_stale(wiki_root))
     findings.sort(key=lambda f: (_SEVERITY_ORDER[f.severity], str(f.file), f.line or 0))
     return findings
 

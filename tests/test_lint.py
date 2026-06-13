@@ -302,3 +302,14 @@ def test_run_lint_includes_new_checks(lint_mod, tmp_path):
     findings = lint_mod.run_lint(wiki)
     checks = {f.check for f in findings}
     assert "bom" in checks and "duplicate-key" in checks
+
+
+# ── Check 11: overview-stale ───────────────────────────────────────────────
+
+def test_overview_stale_flagged(lint_mod, tmp_path):
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    (wiki / "overview.md").write_text(
+        "---\ntype: theme\nupdated: 2026-01-01\n---\nThesis.\n", encoding="utf-8")
+    findings = lint_mod.check_overview_stale(wiki, today="2026-06-13")
+    assert len(findings) == 1 and findings[0].severity == "INFO"
