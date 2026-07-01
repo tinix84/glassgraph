@@ -106,7 +106,7 @@ def parse_key_extractions(body: str) -> list[Bullet]:
             in_keyx = True; in_sub = False; continue
         if in_keyx and _H2_RE.match(line):
             break
-        if _SUBSECTION_RE.match(line):
+        if in_keyx and _SUBSECTION_RE.match(line):
             in_sub = True; continue
         if in_keyx and in_sub:
             m = _BULLET_RE.match(line.strip())
