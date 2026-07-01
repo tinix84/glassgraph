@@ -434,7 +434,7 @@ def _run_relations(sub: str | None, path: str | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
-    parser.add_argument("command", help="'backfill' | 'cluster' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
+    parser.add_argument("command", help="'backfill' | 'cluster' | 'lint' | 'lookup' | 'explain' | 'suggest' | 'relations' | path to raw/*.md")
     parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
     parser.add_argument("extra2", nargs="?", default=None,
                         help="Third positional (e.g. relations extract <path>)")

@@ -1,4 +1,4 @@
-"""Defensive lints for the 2brain wiki — 11 checks aggregated into one report.
+"""Defensive lints for the 2brain wiki — 13 checks aggregated into one report.
 
 Each check is a pure function: (root_path) -> list[LintFinding]. Findings are
 sorted by severity (CRITICAL > WARN > INFO) then file path. Returns exit code 1
@@ -428,7 +428,7 @@ def check_relation_drift(pages: list[Path]) -> list[LintFinding]:
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
 def run_lint(wiki_root: Path) -> list[LintFinding]:
-    """Run all 11 checks and return findings sorted by severity then file."""
+    """Run all 13 checks and return findings sorted by severity then file."""
     all_pages = _all_wiki_pages(wiki_root)
     findings: list[LintFinding] = []
     findings.extend(check_yaml_validity(all_pages))
