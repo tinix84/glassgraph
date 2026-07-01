@@ -6,7 +6,9 @@ GLiREL voters are layered in a follow-up plan.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 PREDICATES: dict[str, dict] = {
     "vendor_of":     {"source": "derived",   "symmetric": False, "gated": False},
@@ -38,3 +40,31 @@ def canonical(rel: Relation) -> Relation:
     if rel.p in SYMMETRIC and rel.s > rel.o:
         return Relation(s=rel.o, p=rel.p, o=rel.s, by=rel.by)
     return rel
+
+
+_DIRECTIONS = {"subject_to_object", "object_to_subject"}
+
+
+@dataclass(frozen=True)
+class LexEntry:
+    trigger: str
+    predicate: str
+    subj_type: str
+    obj_type: str
+    direction: str
+
+
+def load_lexicon(path) -> list[LexEntry]:
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    entries: list[LexEntry] = []
+    for i, e in enumerate(raw):
+        pred = e["predicate"]
+        if pred not in PREDICATES:
+            raise ValueError(f"predicates.json[{i}]: unknown predicate {pred!r}")
+        if e["direction"] not in _DIRECTIONS:
+            raise ValueError(f"predicates.json[{i}]: bad direction {e['direction']!r}")
+        entries.append(LexEntry(
+            trigger=e["trigger"].lower(), predicate=pred,
+            subj_type=e["subj_type"], obj_type=e["obj_type"],
+            direction=e["direction"]))
+    return entries

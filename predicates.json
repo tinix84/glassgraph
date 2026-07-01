@@ -1,0 +1,12 @@
+[
+  {"trigger": "supplier",     "predicate": "supplies",      "subj_type": "company",    "obj_type": "technology", "direction": "subject_to_object"},
+  {"trigger": "supplies",     "predicate": "supplies",      "subj_type": "company",    "obj_type": "technology", "direction": "subject_to_object"},
+  {"trigger": "predecessor",  "predicate": "succeeds",      "subj_type": "technology", "obj_type": "technology", "direction": "object_to_subject"},
+  {"trigger": "replaced by",  "predicate": "succeeds",      "subj_type": "technology", "obj_type": "technology", "direction": "object_to_subject"},
+  {"trigger": "collaboration","predicate": "partners_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
+  {"trigger": "partnership",  "predicate": "partners_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
+  {"trigger": "competitor",   "predicate": "competes_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
+  {"trigger": "based on",     "predicate": "uses",          "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"},
+  {"trigger": "implements",   "predicate": "implements",    "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"},
+  {"trigger": "uses",         "predicate": "uses",          "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"}
+]
