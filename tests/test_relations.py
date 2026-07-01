@@ -117,3 +117,21 @@ def test_derived_evidence_for_from_theme_sources():
     rels = R.derived_edges("Si-to-SiC-transition", "theme",
                            {"sources": ["srcA.md", "srcB.md"]})
     assert R.Relation("[[srcA]]", "evidence_for", "[[Si-to-SiC-transition]]", "derived") in rels
+
+
+def test_combine_single_voter_floor_accepts():
+    lex = [R.Relation("[[A]]", "uses", "[[B]]", "lexicon")]
+    scored = R.combine([lex], min_votes=2)
+    assert len(scored) == 1
+    assert scored[0].accepted is True          # single-voter floor
+    assert scored[0].rel.by == "lexicon"
+    assert scored[0].conf == 1.0
+
+def test_combine_majority_marks_consensus():
+    a = R.Relation("[[A]]", "uses", "[[B]]", "lexicon")
+    b = R.Relation("[[A]]", "uses", "[[B]]", "glirel")
+    c = R.Relation("[[A]]", "supplies", "[[B]]", "depparse")
+    scored = {s.rel.p: s for s in R.combine([[a], [b], [c]], min_votes=2)}
+    assert scored["uses"].votes == 2 and scored["uses"].accepted
+    assert scored["uses"].rel.by == "consensus"
+    assert scored["supplies"].votes == 1 and not scored["supplies"].accepted

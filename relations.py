@@ -168,3 +168,36 @@ def derived_edges(name: str, page_type: str, meta: dict) -> list[Relation]:
         for src in meta.get("sources") or []:
             out.append(Relation(f"[[{_bare(str(src))}]]", "evidence_for", f"[[{name}]]", "derived"))
     return out
+
+
+@dataclass(frozen=True)
+class ScoredRelation:
+    rel: Relation
+    votes: int
+    conf: float
+    accepted: bool
+
+
+def combine(voter_outputs: list[list[Relation]], min_votes: int = 2) -> list[ScoredRelation]:
+    n = len(voter_outputs)
+    tally: dict[tuple[str, str, str], list[str]] = {}
+    for out in voter_outputs:
+        seen_this_voter: set[tuple[str, str, str]] = set()
+        for rel in out:
+            key = (rel.s, rel.p, rel.o)
+            if key in seen_this_voter:
+                continue
+            seen_this_voter.add(key)
+            tally.setdefault(key, []).append(rel.by)
+    scored: list[ScoredRelation] = []
+    for (s, p, o), bys in tally.items():
+        votes = len(bys)
+        conf = votes / n if n else 0.0
+        if n >= 2:
+            accepted = votes >= min_votes
+            by = "consensus" if votes >= 2 else bys[0]
+        else:
+            accepted = True
+            by = bys[0]
+        scored.append(ScoredRelation(Relation(s, p, o, by), votes, conf, accepted))
+    return scored
