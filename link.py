@@ -396,10 +396,48 @@ def run_backfill(
     return False
 
 
+def _entity_types(wiki_root: Path) -> dict[str, str]:
+    """Map entity page stem -> page type across the four entity dirs."""
+    fm = _import_module("frontmatter")
+    types: dict[str, str] = {}
+    for d in ("companies", "technologies", "products", "themes"):
+        for page in sorted((wiki_root / d).glob("*.md")) if (wiki_root / d).exists() else []:
+            meta = fm.parse_file(page).metadata or {}
+            t = meta.get("type")
+            if t:
+                types[page.stem] = t
+    return types
+
+
+def _run_relations(sub: str | None, path: str | None) -> None:
+    rel = _import_module("relations")
+    if sub == "extract":
+        if not path:
+            print("ERROR: relations extract requires a source path", file=sys.stderr)
+            sys.exit(1)
+        lex = rel.load_lexicon(_HERE / "predicates.json")
+        types = _entity_types(Path("wiki"))
+        scored = rel.extract_relations(Path(path), types, lex, focus=None)
+        print(json.dumps([{"s": s.rel.s, "p": s.rel.p, "o": s.rel.o,
+                           "by": s.rel.by, "conf": s.conf}
+                          for s in scored if s.accepted], ensure_ascii=False, indent=2))
+    elif sub == "graph":
+        rgraph = _import_module("relation_graph")
+        g = rgraph.build_relation_graph(Path("wiki/sources"))
+        rgraph.export_json(g, Path(".tools/index/relation-graph.json"))
+        rgraph.export_graphml(g, Path(".tools/index/relation-graph.graphml"))
+        print(f"relation graph: {g.number_of_nodes()} nodes, {g.number_of_edges()} edges")
+    else:
+        print("ERROR: relations subcommand must be 'extract' or 'graph'", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
     parser.add_argument("command", help="'backfill' | 'cluster' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
     parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
+    parser.add_argument("extra2", nargs="?", default=None,
+                        help="Third positional (e.g. relations extract <path>)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
     parser.add_argument("--verbose", action="store_true", help="Show per-entity hits")
@@ -444,6 +482,8 @@ def main() -> None:
             print("ERROR: lookup requires a name", file=sys.stderr)
             sys.exit(1)
         sys.exit(run_lookup(args.extra))
+    elif args.command == "relations":
+        _run_relations(sub=args.extra, path=args.extra2)
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():

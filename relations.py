@@ -178,6 +178,14 @@ class ScoredRelation:
     accepted: bool
 
 
+def extract_relations(source_path, entity_types: dict[str, str],
+                      lexicon: list[LexEntry], focus: str | None) -> list[ScoredRelation]:
+    body = _fm.parse_file(Path(source_path)).body
+    bullets = parse_key_extractions(body)
+    lex_out = lexicon_vote(bullets, entity_types, lexicon, focus)
+    return combine([lex_out], min_votes=2)  # single-voter floor; more voters later
+
+
 def combine(voter_outputs: list[list[Relation]], min_votes: int = 2) -> list[ScoredRelation]:
     n = len(voter_outputs)
     tally: dict[tuple[str, str, str], list[str]] = {}
