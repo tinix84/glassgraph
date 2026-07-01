@@ -54,3 +54,49 @@ def test_shipped_seed_lexicon_is_valid():
     entries = R.load_lexicon(seed)
     assert len(entries) >= 8
     assert all(e.predicate in R.EXTRACTED for e in entries)
+
+
+SAMPLE_BODY = """# Source: X
+
+## Key extractions
+
+### Companies mentioned
+- [[STMicroelectronics]] — SiC MOSFET and [[SiC-MOSFET]] gate driver supplier
+- [[Tesla]] — designer/OEM of the inverter
+
+### Technologies mentioned
+- [[IGBT]] — predecessor technology to [[SiC-MOSFET]]
+
+## Quality verdict
+- irrelevant
+"""
+
+def test_parse_key_extractions():
+    bullets = R.parse_key_extractions(SAMPLE_BODY)
+    subs = {b.subject for b in bullets}
+    assert subs == {"STMicroelectronics", "Tesla", "IGBT"}
+    st = next(b for b in bullets if b.subject == "STMicroelectronics")
+    assert "SiC-MOSFET" in st.links
+
+def test_resolve_object_prefers_in_bullet_link():
+    b = R.Bullet(subject="STMicroelectronics", text="... supplier",
+                 links=("SiC-MOSFET",))
+    entry = R.LexEntry("supplier", "supplies", "company", "technology", "subject_to_object")
+    assert R.resolve_object(b, entry, focus="Tesla") == "SiC-MOSFET"
+
+def test_resolve_object_falls_back_to_focus_then_none():
+    b = R.Bullet(subject="Tesla", text="designer/OEM", links=())
+    entry = R.LexEntry("designer", "vendor_of", "company", "product", "subject_to_object")
+    assert R.resolve_object(b, entry, focus="Inverter") == "Inverter"
+    assert R.resolve_object(b, entry, focus=None) is None
+
+def test_lexicon_vote_direction_and_wrapping():
+    bullets = R.parse_key_extractions(SAMPLE_BODY)
+    types = {"STMicroelectronics": "company", "Tesla": "company",
+             "IGBT": "technology", "SiC-MOSFET": "technology"}
+    lex = R.load_lexicon(_P(__file__).resolve().parents[1] / "predicates.json")
+    rels = R.lexicon_vote(bullets, types, lex, focus=None)
+    # "IGBT — predecessor ... [[SiC-MOSFET]]" ⇒ SiC-MOSFET succeeds IGBT (object_to_subject)
+    assert R.Relation("[[SiC-MOSFET]]", "succeeds", "[[IGBT]]", "lexicon") in rels
+    # "STMicroelectronics — ... supplier ... [[SiC-MOSFET]]" ⇒ ST supplies SiC-MOSFET
+    assert R.Relation("[[STMicroelectronics]]", "supplies", "[[SiC-MOSFET]]", "lexicon") in rels

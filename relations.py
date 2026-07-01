@@ -6,7 +6,10 @@ GLiREL voters are layered in a follow-up plan.
 """
 from __future__ import annotations
 
+import importlib.util as _ilu
 import json
+import re
+import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,3 +71,79 @@ def load_lexicon(path) -> list[LexEntry]:
             subj_type=e["subj_type"], obj_type=e["obj_type"],
             direction=e["direction"]))
     return entries
+
+
+def _load_frontmatter():
+    if "frontmatter" in _sys.modules:
+        return _sys.modules["frontmatter"]
+    src = Path(__file__).resolve().parent / "frontmatter.py"
+    spec = _ilu.spec_from_file_location("frontmatter", src)
+    mod = _ilu.module_from_spec(spec)
+    _sys.modules["frontmatter"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_fm = _load_frontmatter()
+_SUBSECTION_RE = re.compile(r"^###\s+.*mentioned", re.IGNORECASE)
+_KEYX_RE = re.compile(r"^##\s+Key extractions", re.IGNORECASE)
+_H2_RE = re.compile(r"^##\s+")
+_BULLET_RE = re.compile(r"^-\s+\[\[([^\[\]\|]+?)(?:\|[^\[\]]+)?\]\]\s*[—-]\s*(.*)$")
+
+
+@dataclass(frozen=True)
+class Bullet:
+    subject: str
+    text: str
+    links: tuple[str, ...]
+
+
+def parse_key_extractions(body: str) -> list[Bullet]:
+    bullets: list[Bullet] = []
+    in_keyx = in_sub = False
+    for line in body.split("\n"):
+        if _KEYX_RE.match(line):
+            in_keyx = True; in_sub = False; continue
+        if in_keyx and _H2_RE.match(line):
+            break
+        if _SUBSECTION_RE.match(line):
+            in_sub = True; continue
+        if in_keyx and in_sub:
+            m = _BULLET_RE.match(line.strip())
+            if m:
+                subject, text = m.group(1).strip(), m.group(2)
+                # WIKILINK_RE has one capturing group → findall returns plain strings
+                links = tuple(t.strip() for t in _fm.WIKILINK_RE.findall(text)
+                              if t.strip() != subject)
+                bullets.append(Bullet(subject, text, links))
+    return bullets
+
+
+def resolve_object(bullet: Bullet, entry: LexEntry, focus: str | None) -> str | None:
+    if bullet.links:
+        return bullet.links[0]
+    return focus
+
+
+def lexicon_vote(bullets, entry_types: dict[str, str],
+                 lexicon: list[LexEntry], focus: str | None) -> list[Relation]:
+    out: list[Relation] = []
+    for b in bullets:
+        subj_type = entry_types.get(b.subject)
+        low = b.text.lower()
+        for entry in lexicon:
+            if entry.trigger not in low:
+                continue
+            if subj_type is not None and subj_type != entry.subj_type:
+                continue
+            obj = resolve_object(b, entry, focus)
+            if obj is None:
+                continue
+            if entry.direction == "subject_to_object":
+                s, o = b.subject, obj
+            else:
+                s, o = obj, b.subject
+            rel = canonical(Relation(f"[[{s}]]", entry.predicate, f"[[{o}]]", "lexicon"))
+            if rel not in out:
+                out.append(rel)
+    return out
