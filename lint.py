@@ -6,6 +6,7 @@ when any CRITICAL finding present.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -385,6 +386,45 @@ def check_overview_stale(wiki_root: Path, today: str | None = None) -> list[Lint
     return []
 
 
+# ── Check 12: malformed-relation ────────────────────────────────────────────
+
+def check_malformed_relations(pages: list[Path]) -> list[LintFinding]:
+    findings = []
+    for p in pages:
+        parsed = frontmatter.parse_file(p)
+        if not parsed.metadata:
+            continue
+        rels = parsed.metadata.get("relations")
+        if rels is None:
+            continue
+        ok = isinstance(rels, list) and all(
+            isinstance(r, dict) and {"s", "p", "o", "by"} <= r.keys() for r in rels)
+        if not ok:
+            findings.append(LintFinding(
+                severity="CRITICAL", check="malformed-relation",
+                file=p, line=None,
+                message="relations: not a list of {s,p,o,by} mappings"))
+    return findings
+
+
+# ── Check 13: relation-drift ────────────────────────────────────────────────
+
+def check_relation_drift(pages: list[Path]) -> list[LintFinding]:
+    findings = []
+    for p in pages:
+        parsed = frontmatter.parse_file(p)
+        if not parsed.metadata or "relations" not in parsed.metadata:
+            continue
+        stored = parsed.metadata.get("relations_src_md5")
+        current = hashlib.md5(parsed.body.strip("\n").encode("utf-8")).hexdigest()
+        if stored != current:
+            findings.append(LintFinding(
+                severity="WARN", check="relation-drift",
+                file=p, line=None,
+                message=f"relations_src_md5 {stored} != body md5 {current} (re-extract)"))
+    return findings
+
+
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
 def run_lint(wiki_root: Path) -> list[LintFinding]:
@@ -402,6 +442,8 @@ def run_lint(wiki_root: Path) -> list[LintFinding]:
     findings.extend(check_bom(all_pages))
     findings.extend(check_duplicate_keys(all_pages))
     findings.extend(check_overview_stale(wiki_root))
+    findings.extend(check_malformed_relations(all_pages))
+    findings.extend(check_relation_drift(all_pages))
     findings.sort(key=lambda f: (_SEVERITY_ORDER[f.severity], str(f.file), f.line or 0))
     return findings
 
