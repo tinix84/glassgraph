@@ -147,3 +147,24 @@ def lexicon_vote(bullets, entry_types: dict[str, str],
             if rel not in out:
                 out.append(rel)
     return out
+
+
+def _bare(link: str) -> str:
+    """'[[X|y]]' or '[[X]]' or 'X.md' or 'X' → 'X'."""
+    m = _fm.WIKILINK_RE.search(link)
+    core = m.group(1).strip() if m else link.strip()
+    return core[:-3] if core.endswith(".md") else core
+
+
+def derived_edges(name: str, page_type: str, meta: dict) -> list[Relation]:
+    out: list[Relation] = []
+    if page_type == "product" and meta.get("vendor"):
+        company = _bare(str(meta["vendor"]))
+        out.append(Relation(f"[[{company}]]", "vendor_of", f"[[{name}]]", "derived"))
+    if page_type == "source":
+        for t in meta.get("touches") or []:
+            out.append(Relation(f"[[{name}]]", "mentions", f"[[{_bare(str(t))}]]", "derived"))
+    if page_type == "theme":
+        for src in meta.get("sources") or []:
+            out.append(Relation(f"[[{_bare(str(src))}]]", "evidence_for", f"[[{name}]]", "derived"))
+    return out

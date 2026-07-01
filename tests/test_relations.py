@@ -100,3 +100,20 @@ def test_lexicon_vote_direction_and_wrapping():
     assert R.Relation("[[SiC-MOSFET]]", "succeeds", "[[IGBT]]", "lexicon") in rels
     # "STMicroelectronics — ... supplier ... [[SiC-MOSFET]]" ⇒ ST supplies SiC-MOSFET
     assert R.Relation("[[STMicroelectronics]]", "supplies", "[[SiC-MOSFET]]", "lexicon") in rels
+
+
+def test_derived_vendor_of():
+    rels = R.derived_edges("Tesla-Model-3-inverter", "product",
+                           {"vendor": "[[Tesla]]"})
+    assert R.Relation("[[Tesla]]", "vendor_of", "[[Tesla-Model-3-inverter]]", "derived") in rels
+
+def test_derived_mentions_from_touches():
+    rels = R.derived_edges("some-source", "source",
+                           {"touches": ["[[Tesla]]", "[[SiC-MOSFET]]"]})
+    assert R.Relation("[[some-source]]", "mentions", "[[Tesla]]", "derived") in rels
+    assert len(rels) == 2
+
+def test_derived_evidence_for_from_theme_sources():
+    rels = R.derived_edges("Si-to-SiC-transition", "theme",
+                           {"sources": ["srcA.md", "srcB.md"]})
+    assert R.Relation("[[srcA]]", "evidence_for", "[[Si-to-SiC-transition]]", "derived") in rels
