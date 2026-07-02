@@ -6,7 +6,5 @@
   {"trigger": "collaboration","predicate": "partners_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
   {"trigger": "partnership",  "predicate": "partners_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
   {"trigger": "competitor",   "predicate": "competes_with", "subj_type": "company",    "obj_type": "company",    "direction": "subject_to_object"},
-  {"trigger": "based on",     "predicate": "uses",          "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"},
-  {"trigger": "implements",   "predicate": "implements",    "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"},
-  {"trigger": "uses",         "predicate": "uses",          "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"}
+  {"trigger": "implements",   "predicate": "implements",    "subj_type": "product",    "obj_type": "technology", "direction": "subject_to_object"}
 ]
