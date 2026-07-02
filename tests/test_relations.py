@@ -169,6 +169,19 @@ def test_lexicon_vote_no_self_loop():
     rels = R.lexicon_vote(bullets, types, lex, focus="Tesla")   # focus == subject
     assert rels == []                                 # no self-edge
 
+def test_lexicon_vote_drops_untyped_object():
+    # object is a broken-link / thesis-like name with no page (untyped) -> drop
+    bullets = [R.Bullet(subject="GaN-HEMT", text="predecessor of it", links=("Some-Untyped",))]
+    types = {"GaN-HEMT": "technology"}                 # 'Some-Untyped' has no type
+    lex = [R.LexEntry("predecessor", "succeeds", "technology", "technology", "object_to_subject")]
+    assert R.lexicon_vote(bullets, types, lex, focus=None) == []
+
+def test_lexicon_vote_drops_untyped_subject():
+    bullets = [R.Bullet(subject="Untyped-Thesis", text="supplier of", links=("SiC-MOSFET",))]
+    types = {"SiC-MOSFET": "technology"}               # subject has no type
+    lex = [R.LexEntry("supplier", "supplies", "company", "technology", "subject_to_object")]
+    assert R.lexicon_vote(bullets, types, lex, focus=None) == []
+
 def test_extract_relations_derives_focus(tmp_path):
     body = ("## Key extractions\n\n### Companies mentioned\n"
             "- [[STMicroelectronics]] — gate driver supplier\n\n"

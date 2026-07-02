@@ -135,13 +135,13 @@ def lexicon_vote(bullets, entry_types: dict[str, str],
         for entry in lexicon:
             if entry.trigger not in low:
                 continue
-            if subj_type is not None and subj_type != entry.subj_type:
+            if subj_type != entry.subj_type:      # require known + matching subject type
                 continue
             obj = resolve_object(b, entry, focus)
             if obj is None or obj == b.subject:
                 continue
             obj_type = entry_types.get(obj)
-            if obj_type is not None and obj_type != entry.obj_type:
+            if obj_type != entry.obj_type:         # require known + matching object type
                 continue
             if entry.direction == "subject_to_object":
                 s, o = b.subject, obj
