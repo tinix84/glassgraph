@@ -135,3 +135,48 @@ def test_combine_majority_marks_consensus():
     assert scored["uses"].votes == 2 and scored["uses"].accepted
     assert scored["uses"].rel.by == "consensus"
     assert scored["supplies"].votes == 1 and not scored["supplies"].accepted
+
+
+def test_dominant_focus_frequency():
+    body = ("## Key extractions\n\n### Companies mentioned\n"
+            "- [[Tesla]] — maker of [[Tesla-Model-3-inverter]]\n"
+            "- [[STMicroelectronics]] — supplier\n\n"
+            "## Wiki updates\n- [[Tesla]] leads; [[Tesla]] again\n")
+    assert R.dominant_focus(body) == "Tesla"          # 3 mentions beats the rest
+
+def test_dominant_focus_none_when_no_links():
+    assert R.dominant_focus("plain text, no wikilinks") is None
+
+def test_lexicon_vote_enforces_object_type_when_known():
+    # "supplies" requires obj_type technology; a product focus must be dropped
+    bullets = [R.Bullet(subject="STMicroelectronics", text="gate driver supplier", links=())]
+    types = {"STMicroelectronics": "company", "Tesla-Model-3-inverter": "product"}
+    lex = [R.LexEntry("supplier", "supplies", "company", "technology", "subject_to_object")]
+    rels = R.lexicon_vote(bullets, types, lex, focus="Tesla-Model-3-inverter")
+    assert rels == []                                 # object type product != technology
+
+def test_lexicon_vote_allows_object_when_type_matches():
+    bullets = [R.Bullet(subject="STMicroelectronics", text="gate driver supplier", links=())]
+    types = {"STMicroelectronics": "company", "SiC-MOSFET": "technology"}
+    lex = [R.LexEntry("supplier", "supplies", "company", "technology", "subject_to_object")]
+    rels = R.lexicon_vote(bullets, types, lex, focus="SiC-MOSFET")
+    assert R.Relation("[[STMicroelectronics]]", "supplies", "[[SiC-MOSFET]]", "lexicon") in rels
+
+def test_lexicon_vote_no_self_loop():
+    bullets = [R.Bullet(subject="Tesla", text="competitor", links=())]
+    types = {"Tesla": "company"}
+    lex = [R.LexEntry("competitor", "competes_with", "company", "company", "subject_to_object")]
+    rels = R.lexicon_vote(bullets, types, lex, focus="Tesla")   # focus == subject
+    assert rels == []                                 # no self-edge
+
+def test_extract_relations_derives_focus(tmp_path):
+    body = ("## Key extractions\n\n### Companies mentioned\n"
+            "- [[STMicroelectronics]] — gate driver supplier\n\n"
+            "## Notes\n- [[SiC-MOSFET]] recurs [[SiC-MOSFET]]\n")
+    src = tmp_path / "s.md"
+    src.write_text("---\ntype: source\n---\n" + body, encoding="utf-8")
+    lex = R.load_lexicon(_P(R.__file__).resolve().parent / "predicates.json")
+    types = {"STMicroelectronics": "company", "SiC-MOSFET": "technology"}
+    scored = R.extract_relations(src, types, lex, focus=None)   # focus derived → SiC-MOSFET
+    accepted = [s.rel for s in scored if s.accepted]
+    assert R.Relation("[[STMicroelectronics]]", "supplies", "[[SiC-MOSFET]]", "lexicon") in accepted

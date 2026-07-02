@@ -10,6 +10,7 @@ import importlib.util as _ilu
 import json
 import re
 import sys as _sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,7 +138,10 @@ def lexicon_vote(bullets, entry_types: dict[str, str],
             if subj_type is not None and subj_type != entry.subj_type:
                 continue
             obj = resolve_object(b, entry, focus)
-            if obj is None:
+            if obj is None or obj == b.subject:
+                continue
+            obj_type = entry_types.get(obj)
+            if obj_type is not None and obj_type != entry.obj_type:
                 continue
             if entry.direction == "subject_to_object":
                 s, o = b.subject, obj
@@ -178,10 +182,27 @@ class ScoredRelation:
     accepted: bool
 
 
+def dominant_focus(body: str) -> str | None:
+    """The single most-referenced entity across a page body — object-resolution
+    fallback (design step 2). Bare names; ties broken by first appearance."""
+    targets = []
+    for t in _fm.WIKILINK_RE.findall(body):
+        name = str(t).split("|")[0].strip()
+        if name.endswith(".md"):
+            name = name[:-3]
+        if name:
+            targets.append(name)
+    if not targets:
+        return None
+    return Counter(targets).most_common(1)[0][0]  # Counter is insertion-ordered → 1st on ties
+
+
 def extract_relations(source_path, entity_types: dict[str, str],
                       lexicon: list[LexEntry], focus: str | None) -> list[ScoredRelation]:
     body = _fm.parse_file(Path(source_path)).body
     bullets = parse_key_extractions(body)
+    if focus is None:
+        focus = dominant_focus(body)
     lex_out = lexicon_vote(bullets, entity_types, lexicon, focus)
     return combine([lex_out], min_votes=2)  # single-voter floor; more voters later
 
