@@ -17,7 +17,7 @@ def test_ten_predicates_partitioned():
     assert len(R.PREDICATES) == 10
     assert R.DERIVED == frozenset({"vendor_of", "mentions", "evidence_for"})
     assert R.SYMMETRIC == frozenset({"competes_with", "partners_with"})
-    assert "uses" in R.EXTRACTED and "vendor_of" not in R.EXTRACTED
+    assert "used_in" in R.EXTRACTED and "vendor_of" not in R.EXTRACTED
 
 def test_canonical_orders_symmetric_only():
     sym = R.Relation(s="[[Zeta]]", p="competes_with", o="[[Alpha]]", by="lexicon")

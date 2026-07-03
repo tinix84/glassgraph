@@ -22,7 +22,7 @@ def _src(dir, name, rels):
     (dir / name).write_text("\n".join(lines), encoding="utf-8")
 
 def test_directed_edge_added(tmp_path):
-    _src(tmp_path, "a.md", [("[[Tesla]]", "uses", "[[SiC-MOSFET]]")])
+    _src(tmp_path, "a.md", [("[[Tesla]]", "used_in", "[[SiC-MOSFET]]")])
     g = rg.build_relation_graph(tmp_path)
     assert g.has_edge("Tesla", "SiC-MOSFET")
 
@@ -32,7 +32,7 @@ def test_symmetric_expands_both_ways(tmp_path):
     assert g.has_edge("Huawei", "Delta") and g.has_edge("Delta", "Huawei")
 
 def test_export_roundtrip(tmp_path):
-    _src(tmp_path, "a.md", [("[[Tesla]]", "uses", "[[SiC-MOSFET]]")])
+    _src(tmp_path, "a.md", [("[[Tesla]]", "used_in", "[[SiC-MOSFET]]")])
     g = rg.build_relation_graph(tmp_path)
     rg.export_json(g, tmp_path / "graph.json")
     rg.export_graphml(g, tmp_path / "graph.graphml")

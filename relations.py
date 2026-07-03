@@ -18,7 +18,7 @@ PREDICATES: dict[str, dict] = {
     "vendor_of":     {"source": "derived",   "symmetric": False, "gated": False},
     "mentions":      {"source": "derived",   "symmetric": False, "gated": False},
     "evidence_for":  {"source": "derived",   "symmetric": False, "gated": False},
-    "uses":          {"source": "extracted", "symmetric": False, "gated": True},
+    "used_in":       {"source": "extracted", "symmetric": False, "gated": True},
     "implements":    {"source": "extracted", "symmetric": False, "gated": True},
     "achieves_spec": {"source": "extracted", "symmetric": False, "gated": True},
     "supplies":      {"source": "extracted", "symmetric": False, "gated": True},

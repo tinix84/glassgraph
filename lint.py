@@ -27,7 +27,7 @@ def _load_frontmatter():
 frontmatter = _load_frontmatter()
 _WIKILINK_RE = frontmatter.WIKILINK_RE
 _SEVERITY_ORDER = {"CRITICAL": 0, "WARN": 1, "INFO": 2}
-_ENTITY_DIRS = ("companies", "technologies", "products", "themes")
+_ENTITY_DIRS = ("companies", "technologies", "products", "markets", "themes")
 
 
 @dataclass

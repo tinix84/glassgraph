@@ -230,8 +230,8 @@ def run_lookup(
         print(f"NOT FOUND: '{name}' — no page or alias resolves to it")
         return 1
 
-    _type_name = {"companies": "company", "technologies": "technology", "products": "product", "themes": "theme"}
-    for d in ("companies", "technologies", "products", "themes"):
+    _type_name = {"companies": "company", "technologies": "technology", "products": "product", "markets": "market", "themes": "theme"}
+    for d in ("companies", "technologies", "products", "markets", "themes"):
         p = wiki_root / d / f"{canonical}.md"
         if p.exists():
             print(f"{canonical} | {_type_name[d]} | {p}")
@@ -397,10 +397,10 @@ def run_backfill(
 
 
 def _entity_types(wiki_root: Path) -> dict[str, str]:
-    """Map entity page stem -> page type across the four entity dirs."""
+    """Map entity page stem -> page type across the entity dirs."""
     fm = _import_module("frontmatter")
     types: dict[str, str] = {}
-    for d in ("companies", "technologies", "products", "themes"):
+    for d in ("companies", "technologies", "products", "markets", "themes"):
         for page in sorted((wiki_root / d).glob("*.md")) if (wiki_root / d).exists() else []:
             meta = fm.parse_file(page).metadata or {}
             t = meta.get("type")
