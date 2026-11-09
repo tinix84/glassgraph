@@ -16,3 +16,4 @@ Decisions for glassgraph and the 2brain vault it serves. Specs live as GitHub is
 | [ADR-0010-market-node-type-and-used-in-predicate](ADR-0010-market-node-type-and-used-in-predicate.md) | 2026-07-03 | Add a `market` node type and a `used_in` predicate mirroring the external BI taxonomy |
 | [ADR-0011-glassgraph-deterministic-evidence-compiler-positioning](ADR-0011-glassgraph-deterministic-evidence-compiler-positioning.md) | 2026-08-29 | Position glassgraph as a deterministic typed-evidence and ontology compiler, not a second-brain app |
 | [ADR-0012-optional-local-semantic-assist-lane](ADR-0012-optional-local-semantic-assist-lane.md) | 2026-08-29 | Optional private local semantic-assist lane behind a model-free deterministic core |
+| [ADR-0013-v1-typed-evidence-contract](ADR-0013-v1-typed-evidence-contract.md) | 2026-11-09 | Define stable evidence, assertion, provenance, determinism, and deletion semantics for v1 |
