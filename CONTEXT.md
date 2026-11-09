@@ -4,6 +4,14 @@
 
 A typed statement that connects a subject, a predicate, and an object. An assertion cites one or more evidence passages.
 
+## Assertion candidate
+
+An evidence-linked relation proposal that has not passed the rule for canonical assertions.
+
+## Authored assertion
+
+An assertion that a person writes explicitly in editor-owned Markdown and links to supporting evidence.
+
 ## Build manifest
 
 A derived record of the source documents, compiler version, configuration, and artifacts in one compiler build.
@@ -15,6 +23,10 @@ A frozen question that tests whether a retrieval backend returns the adjudicated
 ## Canonical build
 
 The complete derived output from a clean compiler run over the current Markdown corpus.
+
+## Canonical assertion
+
+An authored, exact-derived, adjudicated, or qualified deterministic assertion that satisfies the evidence contract.
 
 ## Determinism tier
 
@@ -48,6 +60,10 @@ The document path, heading path, line span, and UTF-8 byte span that locate an e
 
 A human decision that grades an evidence passage as direct, supporting, or irrelevant for one benchmark query.
 
+## Exact-derived assertion
+
+An assertion that the compiler derives from a typed Markdown field through a deterministic join without semantic inference.
+
 ## Evidence intermediate representation
 
 The typed, derived representation of documents, evidence passages, entities, predicates, and assertions.
@@ -63,6 +79,10 @@ A benchmark query for which the corpus contains no evidence that answers the que
 ## Private benchmark
 
 The local benchmark that uses private corpus questions and evidence judgments. Its query-level data cannot enter the public repository.
+
+## Qualified predicate
+
+A predicate whose deterministic extractor passes its evidence-level precision gate on the frozen gold set.
 
 ## Public fixture benchmark
 
