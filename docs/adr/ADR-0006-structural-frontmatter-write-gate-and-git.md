@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-06-11-integrity-foundation-design.md` (2026-06-11, Spec 1 of 3). An architecture review traced every recurring incident in the journal to one missed principle: anything machine-parsed must be machine-written or machine-validated. Evidence: 242 product pages nullified by a bare `released: ?`; 33 CRITICAL parse errors and 14 duplicate `aliases:` keys in one wave; 20 pages carrying duplicate `updated:` keys; 36 source pages with a UTF-8 BOM whose `touches:` vanished silently from the graph; and a linker boundary bug that returned zero hits for Latin aliases embedded in CJK prose. Both mass-breakage incidents were found weeks late because nothing diffed writes and there was no rollback path.
+A 2026-06-11 architecture review linked repeated incidents to unvalidated machine-parsed fields. The review found 242 invalid product pages, 33 critical parse errors, 14 duplicate alias keys, and 20 duplicate update keys. It also found 36 byte-order-marked source pages whose `touches:` entries disappeared from the graph. Git did not provide a timely diff or rollback path.
 
 ## Decision
 

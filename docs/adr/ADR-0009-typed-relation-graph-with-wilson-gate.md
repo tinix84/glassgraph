@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-06-30-semantic-relation-graph-design.md` (2026-06-30, revised 2026-07-01 after a full design grill). The graph was flat and untyped: `touches:` records only "source X mentions entity Y", which yields a co-occurrence web rather than answers to relational questions, and gives content generation no synthesized understanding. Corpus at design time: 917 source pages, 817 entity pages. The founding constraint was that ingest token cost must not rise.
+On 2026-06-30, the corpus had 917 source pages and 817 entity pages. The graph was flat because `touches:` only recorded source-to-entity mentions. The design also required no increase in ingest token cost.
 
 ## Decision
 

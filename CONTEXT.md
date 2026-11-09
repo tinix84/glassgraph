@@ -34,7 +34,7 @@ The reproducibility class of an artifact or operation.
 
 - **Exact**: The same canonical inputs produce byte-identical output.
 - **Environment-pinned**: The same pinned runtime and model environment produce equivalent output.
-- **Advisory**: The output can change between runs and cannot enter the canonical build without deterministic validation.
+- **Advisory**: The output can change between runs and cannot enter the canonical build without human adjudication recorded in Markdown.
 
 ## Document
 
@@ -52,6 +52,10 @@ A contiguous passage in a document that supports an assertion or a retrieval res
 
 A deterministic identifier for one evidence passage within one document and heading path.
 
+## Entity ID
+
+A deterministic identifier for one typed wiki page.
+
 ## Evidence locator
 
 The document path, heading path, line span, and UTF-8 byte span that locate an evidence passage for a reader.
@@ -59,6 +63,14 @@ The document path, heading path, line span, and UTF-8 byte span that locate an e
 ## Evidence judgment
 
 A human decision that grades an evidence passage as direct, supporting, or irrelevant for one benchmark query.
+
+## Heading ID
+
+A deterministic identifier for one heading instance, including its position among equal sibling headings.
+
+## Human adjudication
+
+An affirmative human judgment that binds one typed assertion tuple to its supporting evidence passages.
 
 ## Exact-derived assertion
 
@@ -83,6 +95,10 @@ The local benchmark that uses private corpus questions and evidence judgments. I
 ## Qualified predicate
 
 A predicate whose deterministic extractor passes its evidence-level precision gate on the frozen gold set.
+
+## Predicate ID
+
+A deterministic identifier for one predicate key in one ontology version.
 
 ## Public fixture benchmark
 

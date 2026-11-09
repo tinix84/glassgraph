@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-05-16-zotero-integration-design.md` (2026-05-16). A 500+ paper Zotero library (1,720 items, 59 annotations at design time) had to feed the wiki as academic source pages, with the user's highlights surfacing as cited `Evidence` and with a re-ingest trigger that fires when new annotations appear. Existing Obsidian/Zotero bridge plugins were broken on the installed Zotero major version, and the library contains orphan attachments with no bibliographic parent.
+On 2026-05-16, the Zotero library contained more than 500 papers, 1,720 items, and 59 annotations. Academic source pages needed cited highlights and an annotation-based re-ingest trigger. Installed bridge plugins did not support the Zotero version, and the library contained orphan attachments.
 
 ## Decision
 

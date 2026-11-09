@@ -20,11 +20,13 @@ The private benchmark contains 60 2brain queries:
 - The development split contains 40 queries: 30 positive and 10 negative.
 - The frozen evaluation split contains 20 queries: 15 positive and 5 negative.
 
-Each positive query has evidence judgments with three grades: direct, supporting, and irrelevant. A query can require one passage, alternative passages, or several passages. Each judgment cites an evidence ID from ADR-0013. Negative queries have no relevant evidence ID.
+Each positive query has evidence judgments with three grades: direct, supporting, and irrelevant. Each judgment cites an evidence ID from ADR-0013. Negative queries have no relevant evidence ID.
+
+A positive query defines one or more required evidence groups. IDs in one group are interchangeable alternatives. The result is complete only when the top results satisfy every required group. Thus, `{A, B}` in one group means A or B. Two groups `{A}` and `{B}` mean A and B. Group Recall at 5 is the number of satisfied groups divided by the number of required groups.
 
 The public fixture benchmark contains 20 synthetic technical queries: 15 positive and 5 negative. Glassgraph authors all fixture text. The public fixture includes hard distractors, multilingual aliases, repeated passages, renamed headings, deleted documents, and no-answer cases.
 
-The repository stores only the public fixture under `tests/fixtures/benchmark/v1/`. The private benchmark stays in the vault-side `.glassgraph/benchmarks/private/v1/` directory. The public repository and its build artifacts must not contain private:
+M1 issue #18 must add the public fixture under `tests/fixtures/benchmark/v1/` before it claims public benchmark coverage. The private benchmark stays in the vault-side `.glassgraph/benchmarks/private/v1/` directory. The public repository and its build artifacts must not contain private:
 
 - Markdown, assets, annotations, or source snippets.
 - Paths, filenames, URLs, Zotero keys, or source identifiers.
@@ -35,7 +37,7 @@ Private benchmark execution is local and offline. The runner must not send the c
 
 Public reports can contain only aggregate results. A category needs at least five queries before publication. Reports include:
 
-- Recall at 5 for direct and supporting evidence.
+- Group Recall at 5 for required direct and supporting evidence groups.
 - Normalized discounted cumulative gain at 10 for graded relevance.
 - False-positive rate at 5 for negative queries.
 - Median and 95th-percentile query latency.
@@ -55,7 +57,7 @@ The benchmark manifest records the schema version, corpus snapshot hash, query-s
 
 ## Consequences
 
-- Public continuous integration can test the full benchmark schema without private data.
+- Public continuous integration can test the full benchmark schema after M1 adds the synthetic fixture.
 - Backend selection uses the private evaluation split and aggregate local results.
 - A public contributor cannot reproduce private scores without the owner's corpus and judgments.
 - Glassgraph can compare zero-language-model and local-model paths with the same evidence-level measures.

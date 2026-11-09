@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-06-11-theme-synthesis-process-design.md` (2026-06-11, Spec 3 of 3). Themes are the declared highest-value layer, but the count sat at 14 from bootstrap while sources grew from 535 to 838 — one theme per 60 sources against one entity page per 1.1 sources. All three designed creation paths were structurally dead: slice-local batch subagents cannot see the global >= 5-source threshold and their evidence notes evaporated in transcripts; the `cluster` command had zero runs in the entire log; `query` auto-file had zero entries. The layer was becoming vestigial.
+On 2026-06-11, the wiki had 14 themes and 838 sources. Slice-local agents could not see the five-source threshold, and their evidence notes did not persist. The `cluster` and query auto-file paths had no recorded use.
 
 ## Decision
 

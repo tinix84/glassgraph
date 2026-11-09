@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-06-11-generated-index-design.md` (2026-06-11, Spec 2 of 3; depends on Spec 1). The hand-maintained catalog had grown to 51 KB with single lines up to 6,850 characters and header counts 40-60% stale. A resync exercise found 86 uncatalogued pages, mis-tagged stubs and double-listed entries. Worse, invariant #3 routed duplicate prevention through this least reliable artifact, directly producing 14 duplicate-entity merge groups. Parallel batch subagents all wrote the file concurrently under a merge rule that was unenforceable. The resync proved the catalog is fully derivable from page frontmatter — except the one-line summaries.
+On 2026-06-11, the hand-maintained catalog was 51 KB and its header counts were 40–60% stale. A resync found 86 uncataloged pages, mistagged stubs, double entries, and 14 duplicate-entity groups. The exercise showed that frontmatter could generate the catalog except for one-line summaries.
 
 ## Decision
 

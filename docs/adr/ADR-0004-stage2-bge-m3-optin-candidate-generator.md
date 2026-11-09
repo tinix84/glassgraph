@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-05-21-stage2-bge-m3-design.md` (2026-05-21). Stage 1 literal matching misses semantically related entities — product-family neighbours and paraphrased concepts. A validated proof of concept showed BGE-M3 dense retrieval could surface those, but adding a transformer to the pipeline threatened the determinism and zero-cost properties that justified the deterministic linker in the first place.
+On 2026-05-21, testing showed that Stage 1 missed product-family neighbors and paraphrased concepts. A BGE-M3 proof of concept found related entities, but a transformer could weaken determinism and increase local cost.
 
 ## Decision
 

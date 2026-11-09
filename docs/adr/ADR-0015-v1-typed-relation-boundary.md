@@ -18,10 +18,12 @@ V1 has four paths to a canonical assertion:
 
 1. An authored assertion is valid when its typed endpoints exist and it cites at least one valid evidence ID.
 2. An exact-derived assertion is valid when a deterministic join reads a typed Markdown field and cites that field value as evidence.
-3. A human-adjudicated assertion is valid when the judgment records the reviewer, date, evidence IDs, and verdict.
-4. A deterministic extractor can promote an assertion only after its predicate passes the evidence-level qualification gate.
+3. A human-adjudicated assertion is valid only after an affirmative verdict records the reviewer, date, exact typed tuple, and supporting evidence IDs.
+4. A deterministic extractor can promote an assertion only after its qualification key passes the evidence-level gate.
 
-The evidence-level qualification gate requires at least 20 predicted assertions in a frozen gold set. The 95% Wilson lower bound for precision must be at least 0.80. Every predicted assertion must include exact evidence IDs before scoring.
+The qualification key contains the predicate ID, extractor name and version, configuration hash, and gold-set version. Any change creates a new qualification key.
+
+The evidence-level gate requires at least 20 predicted assertions in a frozen gold set. The 95% Wilson lower bound for precision must be at least 0.80. A prediction is correct only when both its typed tuple and required evidence groups match the gold judgment.
 
 The v1 exact-derived predicates are:
 
@@ -31,7 +33,9 @@ The v1 exact-derived predicates are:
 
 The previous `supplies` result is evidence that the predicate is worth requalification. It is not an evidence-level pass. Until requalification, `supplies` output remains an assertion candidate.
 
-The following extracted predicates also remain candidates: `used_in`, `implements`, `achieves_spec`, `succeeds`, `competes_with`, and `partners_with`. Model-generated relations always remain advisory candidates until a person adjudicates them.
+The following extracted predicates also remain candidates: `used_in`, `implements`, `achieves_spec`, `succeeds`, `competes_with`, and `partners_with`. Model-generated relations always remain advisory candidates until a person records an affirmative adjudication in Markdown.
+
+A rejected adjudication stays in the review record and never enters the canonical graph.
 
 Legacy relation records that contain only `s`, `p`, `o`, and `by` are migration candidates. The compiler must not emit them as canonical assertions until it resolves their typed endpoints and evidence IDs.
 

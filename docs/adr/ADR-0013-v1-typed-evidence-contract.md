@@ -16,20 +16,61 @@ Markdown is the only authority. The evidence intermediate representation, indexe
 Glassgraph v1 uses the following canonical forms:
 
 1. The compiler makes a canonical document path from the vault-relative path. It uses `/` separators, removes `.` segments, applies Unicode NFC, and preserves case.
-2. The compiler makes `document_id` with SHA-256 over the domain tag `glassgraph:document:v1` and the canonical document path.
+2. The compiler makes `document_id` from the domain tag `glassgraph:document:v1` and a payload that contains the canonical document path.
 3. The compiler normalizes parsed text to Unicode NFC and LF line endings. It preserves all other whitespace.
-4. An evidence passage is a contiguous range in one normalized document. Its heading path contains the ordered ATX heading levels and normalized heading text.
-5. The compiler makes `evidence_id` with SHA-256 over the domain tag `glassgraph:evidence:v1`, `document_id`, the heading path, the normalized passage hash, and the zero-based occurrence among identical passages in that heading.
-6. An evidence locator stores the canonical path, heading path, one-based inclusive line span, and an original-file UTF-8 byte span. The byte end is exclusive.
-7. Each evidence record stores the normalized passage hash and the exact source-document byte hash. These hashes make stale locators detectable.
-8. An assertion stores its subject ID, predicate ID, object ID or scalar value, one or more evidence IDs, extraction method, compiler version, and determinism tier.
-9. The compiler makes `assertion_id` with SHA-256 over the domain tag `glassgraph:assertion:v1`, the typed subject-predicate-object tuple, and the sorted evidence IDs. Compiler versions and extraction methods do not change semantic identity.
-10. A canonical assertion must cite at least one valid evidence ID. A retrieval hit or advisory model output is not a canonical assertion.
-11. Exact operations use determinism tier A. Pinned embedding or reranking operations use tier B. Language-model output uses tier C and stays advisory until deterministic validation accepts it.
-12. The build manifest records each document hash and every artifact ID emitted for that document. An incremental rebuild removes the prior artifact set before it compiles a changed document. It removes the prior artifact set when a document disappears.
-13. `verify-build` compares canonical serialized output from an incremental build with a clean rebuild. Any difference is a verification failure.
+4. The compiler makes `heading_id` from its document ID, parent heading ID, level, normalized title, and equal-sibling ordinal.
+5. The equal-sibling ordinal counts earlier sibling headings with the same level and normalized title under the same parent.
+6. An evidence passage is a contiguous range in one normalized document and one heading instance.
+7. The compiler makes `evidence_id` from its document ID, heading ID, normalized passage hash, and passage ordinal.
+8. The passage ordinal counts earlier identical normalized passages within that heading instance.
+9. An evidence locator stores the canonical path, heading path, one-based inclusive line span, and original-file UTF-8 byte span. The byte end is exclusive.
+10. Each evidence record stores the normalized passage hash and the exact source-document byte hash. These hashes make stale locators detectable.
+11. The compiler makes `entity_id` from the domain tag `glassgraph:entity:v1`, document ID, page type, and canonical entity name.
+12. The compiler makes `predicate_id` from the domain tag `glassgraph:predicate:v1`, ontology version, and predicate key.
+13. An assertion stores its subject ID, predicate ID, typed object, evidence IDs, extraction method, compiler version, and determinism tier.
+14. An entity object uses `{kind: entity, id: <entity_id>}`. A scalar object records `kind`, `type`, and a canonical string value.
+15. Scalar types are string, integer, decimal, boolean, and date. Decimals use plain base-10 notation. Dates use `YYYY-MM-DD`.
+16. The compiler makes `assertion_id` from the domain tag `glassgraph:assertion:v1`, typed tuple, and sorted evidence IDs.
+17. Compiler versions and extraction methods do not change assertion identity.
+18. A canonical assertion must cite at least one valid evidence ID. A retrieval hit or advisory model output is not a canonical assertion.
+19. Exact operations use tier A. Pinned embedding or reranking operations use tier B. Language-model output uses tier C.
+20. Structural validation can accept tier-C output as a review candidate. Only human adjudication recorded in Markdown can promote it.
+21. The build manifest records each document hash, emitted artifact IDs, and referenced document and evidence IDs.
+22. An incremental rebuild removes the prior artifact set before it compiles a changed document. It removes that set when a document disappears.
+23. A change or deletion also invalidates every dependent assertion and join. The compiler then recompiles the dependent source or recomputes the global join.
+24. `verify-build` compares canonical serialized output from an incremental build with a clean rebuild. Any difference is a verification failure.
 
-Canonical serialization uses UTF-8, LF line endings, sorted object keys, and deterministic list ordering. The compiler must reject invalid UTF-8 instead of replacing bytes.
+Every ID has the form `sha256:<lowercase hex>`. The hash preimage is the UTF-8 domain tag, one NUL byte, and a canonical JSON payload. The payload uses Unicode NFC strings, sorted keys, no insignificant whitespace, and no floating-point numbers. Lists keep their stated semantic order unless this ADR requires sorting. The compiler must reject invalid UTF-8 instead of replacing bytes.
+
+The canonical payload keys are:
+
+```json
+{"document":{"path":"<canonical-path>"}}
+{"heading":{"document_id":"<document-id>","level":2,"parent_id":null,"same_name_ordinal":0,"title":"<normalized-title>"}}
+{"evidence":{"document_id":"<document-id>","heading_id":"<heading-id>","passage_hash":"<sha256>","passage_ordinal":0}}
+{"entity":{"canonical_name":"<name>","document_id":"<document-id>","page_type":"<type>"}}
+{"predicate":{"ontology_version":"v1","predicate_key":"<key>"}}
+{"assertion":{"evidence_ids":["<sorted-evidence-id>"],"object":{"id":"<entity-id>","kind":"entity"},"predicate_id":"<predicate-id>","subject_id":"<entity-id>"}}
+```
+
+The outer labels in this example name each payload. They are not part of the hashed JSON. The hashed document payload is `{"path":"<canonical-path>"}`, for example.
+
+### Golden duplicate-heading vector
+
+This vector uses `wiki/example.md`. The file contains two sibling `## Results` headings. Each heading contains `Efficiency is 98%.` followed by LF.
+
+The first and second heading payloads use `same_name_ordinal` values 0 and 1. Both evidence payloads use `passage_ordinal` 0.
+
+| Value | Expected identifier |
+|---|---|
+| `document_id` | `sha256:cc13d6bd4ca7fbd5f442e43d56db96ea81a020c4c99000ba6079e0692527514a` |
+| First `Results` heading | `sha256:3d768983e310325af1ccd94415b2b086c54d668520c1d8c0d834c712d70435c3` |
+| Second `Results` heading | `sha256:01176993cc71b8ae7cabc4065ace70fa1db8478973460144a4894e3dc16fd95b` |
+| Normalized passage hash | `sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf` |
+| First evidence ID | `sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c` |
+| Second evidence ID | `sha256:5192b389efc2c82bcad2e8424cbb2332a165eb8f9fbd0916409bae10ce56f407` |
+
+The public M1 fixture must implement this vector and fail if the two evidence IDs become equal.
 
 ## Alternatives considered
 
@@ -39,11 +80,12 @@ Canonical serialization uses UTF-8, LF line endings, sorted object keys, and det
 - A byte or line offset was rejected as passage identity. An unrelated insertion would change every later identifier.
 - Compiler version was rejected as part of `assertion_id`. A compiler upgrade must not change an otherwise identical assertion.
 - Incremental deletion by query was rejected. A per-document manifest gives an exact removal set.
+- Path-only invalidation was rejected. Cross-document joins require reverse-dependency invalidation.
 
 ## Consequences
 
 - A document rename changes its document ID and all evidence IDs below it.
-- An evidence-text edit changes its evidence ID. An edit elsewhere in the same heading does not change the ID unless it changes the identical-passage occurrence.
+- An evidence-text edit changes its evidence ID. An edit elsewhere in the same heading does not change the ID unless it changes the passage ordinal.
 - Coordinates can change while an evidence ID stays stable. The document and passage hashes detect stale locators.
 - Every canonical graph edge and retrieval result can resolve to editor-owned Markdown.
 - A clean rebuild can recover all derived state without a database backup.

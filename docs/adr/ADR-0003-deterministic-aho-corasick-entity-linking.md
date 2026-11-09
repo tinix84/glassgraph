@@ -5,7 +5,7 @@
 
 ## Context
 
-Sources: `docs/superpowers/specs/2026-05-19-deterministic-entity-linking-design.md` (2026-05-19) and `docs/superpowers/specs/2026-05-20-entity-linker-phase1-design.md` (2026-05-20). Ingest delegated entity matching entirely to the LLM, so two ingests of the same clipping produced different `touches:` lists. That made ingest untestable, made the wiki graph irreproducible, and made the inbound-link audit unreliable. The wiki already contains a controlled vocabulary — the `aliases_en` / `aliases_cn` fields of every entity page.
+Design reviews on 2026-05-19 and 2026-05-20 found that language-model entity matching produced different `touches:` lists for the same clipping. This made ingest untestable and the graph irreproducible. Each entity page already supplied a controlled vocabulary through `aliases_en` and `aliases_cn`.
 
 ## Decision
 
