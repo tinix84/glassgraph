@@ -1,0 +1,4 @@
+{
+  "deleted": ["wiki/delete-demo.md"],
+  "expected": "All document, heading, evidence, and dependent assertion artifacts are absent."
+}

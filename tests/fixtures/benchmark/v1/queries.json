@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "description": "Glassgraph v1 synthetic evidence retrieval benchmark",
+  "queries": [
+    {
+      "id": "p01-auriga-continuous-power",
+      "type": "exact",
+      "query": "What is the continuous power rating of the Auriga Drive inverter?",
+      "required_groups": [[{"path": "auriga-drive.md", "heading": "Electrical ratings", "text": "Auriga Drive is a 900 V silicon-carbide traction inverter rated for 320 kW continuous output.", "grade": "direct"}]]
+    },
+    {
+      "id": "p02-auriga-cn-alias",
+      "type": "alias",
+      "query": "星航驱动使用哪一种功率半导体材料？",
+      "required_groups": [[{"path": "auriga-drive.md", "heading": "Electrical ratings", "text": "Auriga Drive is a 900 V silicon-carbide traction inverter rated for 320 kW continuous output.", "grade": "direct"}]]
+    },
+    {
+      "id": "p03-auriga-coolant",
+      "type": "semantic",
+      "query": "What coolant inlet temperature is allowed at continuous power for Auriga?",
+      "required_groups": [[{"path": "auriga-drive.md", "heading": "Thermal system", "text": "The liquid-cooling inlet limit is 65 °C at the continuous-power operating point.", "grade": "direct"}]]
+    },
+    {
+      "id": "p04-borealis-topology",
+      "type": "semantic",
+      "query": "Which PFC and isolated converter topologies are used by the Borealis charger?",
+      "required_groups": [[{"path": "borealis-charger.md", "heading": "Power stage", "text": "Borealis is a 60 kW bidirectional charger that uses an interleaved PFC stage and an isolated CLLC converter.", "grade": "direct"}]]
+    },
+    {
+      "id": "p05-borealis-v2g-voltage",
+      "type": "semantic",
+      "query": "What is the maximum DC output voltage of the vehicle-to-grid charger?",
+      "required_groups": [[{"path": "borealis-charger.md", "heading": "Power stage", "text": "The DC output range is 250 V to 1,000 V, and the charger supports vehicle-to-grid operation.", "grade": "direct"}]]
+    },
+    {
+      "id": "p06-cinder-efficiency",
+      "type": "exact",
+      "query": "What peak efficiency does the 5.5 kW Cinder rack converter reach?",
+      "required_groups": [[{"path": "cinder-rack-converter.md", "heading": "Performance", "text": "The 5.5 kW converter reaches 98.4% peak efficiency at half load.", "grade": "direct"}]]
+    },
+    {
+      "id": "p07-cinder-isop-switch",
+      "type": "cross-domain",
+      "query": "Which switch material is used in the 800 V to 48 V ISOP converter?",
+      "required_groups": [
+        [{"path": "cinder-rack-converter.md", "heading": "Architecture", "text": "Cinder converts an 800 V DC bus to 48 V with an input-series, output-parallel architecture.", "grade": "supporting"}],
+        [{"path": "cinder-rack-converter.md", "heading": "Architecture", "text": "The isolated modules use gallium-nitride switches and operate at 500 kHz.", "grade": "direct"}]
+      ]
+    },
+    {
+      "id": "p08-deltaleaf-voltages",
+      "type": "exact",
+      "query": "What feeder voltage and DC bus voltage does DeltaLeaf convert?",
+      "required_groups": [[{"path": "deltaleaf-sst.md", "heading": "Conversion chain", "text": "DeltaLeaf converts a 13.8 kV AC feeder to an 800 V DC bus at 1.2 MW.", "grade": "direct"}]]
+    },
+    {
+      "id": "p09-deltaleaf-topologies",
+      "type": "semantic",
+      "query": "Which SST combines cascaded H-bridge cells with dual-active-bridge modules?",
+      "required_groups": [[{"path": "deltaleaf-sst.md", "heading": "Conversion chain", "text": "The input stage uses cascaded H-bridge cells, and the isolation stage uses dual-active-bridge modules.", "grade": "direct"}]]
+    },
+    {
+      "id": "p10-ember-speed-winding",
+      "type": "cross-domain",
+      "query": "What winding does the 24,000 r/min traction motor use?",
+      "required_groups": [
+        [{"path": "ember-motor.md", "heading": "Ember Motor", "text": "Ember uses a hairpin stator winding and an eight-pole permanent-magnet rotor.", "grade": "direct"}],
+        [{"path": "ember-motor.md", "heading": "Ember Motor", "text": "The motor delivers 180 kW peak power and operates at up to 24,000 r/min.", "grade": "supporting"}]
+      ]
+    },
+    {
+      "id": "p11-faraday-thermal-reduction",
+      "type": "semantic",
+      "query": "How much does double-sided cooling reduce junction-to-coolant thermal resistance?",
+      "required_groups": [[{"path": "faraday-cooling.md", "heading": "Faraday Cooling Module", "text": "The double-sided cold plate reduces junction-to-coolant thermal resistance by 35% compared with the single-sided reference.", "grade": "direct"}]]
+    },
+    {
+      "id": "p12-helix-temperature",
+      "type": "exact",
+      "query": "What continuous baseplate temperature is the Helix AMB substrate qualified for?",
+      "required_groups": [[{"path": "helix-substrate.md", "heading": "Helix AMB Substrate", "text": "The substrate is qualified for continuous operation at a 175 °C baseplate temperature.", "grade": "direct"}]]
+    },
+    {
+      "id": "p13-lumen-cn",
+      "type": "alias",
+      "query": "氮化镓服务器电源的额定功率和峰值效率是多少？",
+      "required_groups": [[
+        {"path": "lumen-server-psu.md", "heading": "中文别名", "text": "流明服务器电源采用氮化镓开关，额定功率为 3.2 kW，峰值效率为 98.6%。", "grade": "direct"},
+        {"path": "lumen-server-psu.md", "heading": "English summary", "text": "The Lumen server PSU uses gallium-nitride switches, has a 3.2 kW rating, and reaches 98.6% peak efficiency.", "grade": "direct"}
+      ]]
+    },
+    {
+      "id": "p14-efficiency-comparison",
+      "type": "cross-domain",
+      "query": "Compare the peak efficiency of the Cinder rack converter with the full-load efficiency of DeltaLeaf.",
+      "required_groups": [
+        [{"path": "cinder-rack-converter.md", "heading": "Performance", "text": "The 5.5 kW converter reaches 98.4% peak efficiency at half load.", "grade": "direct"}],
+        [{"path": "deltaleaf-sst.md", "heading": "Performance", "text": "The measured full-load efficiency is 98.7% with a 45 °C coolant inlet.", "grade": "direct"}]
+      ]
+    },
+    {
+      "id": "p15-coolant-comparison",
+      "type": "cross-domain",
+      "query": "Compare the coolant inlet limits of Auriga Drive and the Borealis charger.",
+      "required_groups": [
+        [{"path": "auriga-drive.md", "heading": "Thermal system", "text": "The liquid-cooling inlet limit is 65 °C at the continuous-power operating point.", "grade": "direct"}],
+        [{"path": "borealis-charger.md", "heading": "Cooling", "text": "The liquid loop accepts a 40 °C inlet at 60 kW output.", "grade": "direct"}]
+      ]
+    },
+    {"id": "n01-sodium-ion", "type": "negative", "query": "Which product uses a sodium-ion battery?", "required_groups": []},
+    {"id": "n02-cinder-1500v", "type": "negative", "query": "What is the 1,500 V output rating of the Cinder rack converter?", "required_groups": []},
+    {"id": "n03-wireless-charger", "type": "negative", "query": "Which document describes a 4 MW wireless charger?", "required_groups": []},
+    {"id": "n04-gallium-oxide", "type": "negative", "query": "Which company supplies gallium-oxide switches?", "required_groups": []},
+    {"id": "n05-quantumflux-date", "type": "negative", "query": "What is the release date of the QuantumFlux controller?", "required_groups": []}
+  ]
+}
