@@ -14,7 +14,8 @@ Add an optional local semantic-assist lane while keeping the compiler, canonical
 - Use Qwen3-4B GGUF Q4_K_M on a pinned llama.cpp build as the reproducibility baseline.
 - Run the baseline CPU-first with an 8,192-token context.
 - Restrict the Qwen3-1.7B Q8_0 fallback to narrow structured tasks.
-- Admit a newer pinned 4B model only after it beats the baseline on the same machine.
+- Evaluate a newer pinned 4B model only through a pinned Ollama runtime.
+- Admit that model only after it beats the baseline on the same machine.
 - A deterministic mode must bypass the model entirely; an assist mode opts into it. If the local runtime is unavailable or fails validation, return the deterministic result — never silently call a cloud service. No cloud URL is accepted in the initial release.
 - The model may do query rewriting, CN/EN normalization suggestions, bounded disambiguation among supplied candidates, evidence compression and cited synthesis — each with a stated guardrail. It may never invent a canonical ID, edit the corpus, the graph or the index, or auto-promote prose into the wiki.
 - Pin everything in a run manifest: model repo/file/SHA-256, runtime release and binary hash, chat template, prompt/schema version, context size, output cap, seed, samplers, threads, backend, and the evidence-packet checksum.
