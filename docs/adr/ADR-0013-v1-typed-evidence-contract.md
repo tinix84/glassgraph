@@ -32,19 +32,22 @@ Glassgraph v1 uses the following canonical forms:
 15. The compiler makes `predicate_id` from the domain tag `glassgraph:predicate:v1`, ontology version, and predicate key.
 16. An assertion stores its subject ID, predicate ID, typed object, evidence IDs, extraction method, compiler version, and determinism tier.
 17. An entity object uses `{kind: entity, id: <entity_id>}`. A scalar object records `kind`, `type`, and a canonical string value.
-18. A string uses NFC without other changes. An integer has no leading zeros. Signed zero becomes `0`.
-19. A decimal uses no exponent, leading plus, trailing fractional zeros, or trailing decimal point. Decimal signed zero becomes `0`.
-20. A boolean is `true` or `false`. A date is a valid `YYYY-MM-DD` calendar date.
-21. The compiler makes `assertion_id` from the domain tag `glassgraph:assertion:v1`, typed tuple, and sorted evidence IDs.
-22. Compiler versions and extraction methods do not change assertion identity.
-23. A canonical assertion must cite at least one valid evidence ID. A retrieval hit or advisory model output is not a canonical assertion.
-24. Exact operations use tier A. Pinned embedding or reranking operations use tier B. Language-model output uses tier C.
-25. Structural validation can accept tier-C output as a review candidate. Only human adjudication recorded in Markdown can promote it.
-26. The build manifest records each document hash, emitted artifact IDs, referenced IDs, and unresolved lookup keys.
-27. An incremental rebuild removes the prior artifact set before it compiles a changed document. It removes that set when a document disappears.
-28. A change or deletion invalidates every dependent assertion and join. The compiler recompiles the dependent source or recomputes the global join.
-29. A new document or alias invalidates dependents with a matching unresolved lookup key.
-30. `verify-build` compares canonical serialized output from an incremental build with a clean rebuild. Any difference is a verification failure.
+18. A string uses NFC without other changes. An integer has an optional minus, no plus, and no leading zeros. Signed zero becomes `0`.
+19. A decimal has an optional minus and no plus or exponent. Its integer part has one or more digits and no redundant leading zeros.
+20. A decimal strips trailing fractional zeros and a trailing decimal point. Values below one use `0` before the point. Signed zero becomes `0`.
+21. A boolean is `true` or `false`. A date is a valid `YYYY-MM-DD` calendar date.
+22. The compiler makes `assertion_id` from the domain tag `glassgraph:assertion:v1`, typed tuple, and sorted evidence IDs.
+23. Compiler versions and extraction methods do not change assertion identity.
+24. A canonical assertion must cite at least one valid evidence ID. A retrieval hit or advisory model output is not a canonical assertion.
+25. Exact operations use tier A. Pinned embedding or reranking operations use tier B. Language-model output uses tier C.
+26. Structural validation can accept tier-C output as a review candidate. Only human adjudication recorded in Markdown can promote it.
+27. The build manifest records each document hash, emitted artifact IDs, referenced IDs, and every resolved or unresolved lookup key.
+28. For each resolved key, the manifest records the selected owner ID and every colliding owner ID.
+29. An incremental rebuild removes the prior artifact set before it compiles a changed document. It removes that set when a document disappears.
+30. A change or deletion invalidates every dependent assertion and join. The compiler recompiles the dependent source or recomputes the global join.
+31. After a document or alias change, the compiler rebuilds the lookup ownership map.
+32. The compiler invalidates dependents for each key whose selected owner or collision set changed.
+33. `verify-build` compares canonical serialized output from an incremental build with a clean rebuild. Any difference is a verification failure.
 
 Every ID has the form `sha256:<lowercase hex>`. The hash preimage is the UTF-8 domain tag, one NUL byte, and a canonical JSON payload. After NFC normalization, payload serialization follows RFC 8785 JSON Canonicalization Scheme. Non-ASCII characters use their UTF-8 bytes and never use optional `\u` escapes. Payloads do not contain floating-point numbers. Lists keep their stated semantic order unless this ADR requires sorting. The compiler must reject invalid UTF-8 instead of replacing bytes.
 
@@ -89,7 +92,7 @@ The frontmatter line `vendor: "[[Tesla]]"` followed by LF has passage hash `sha2
 
 The product entity `Example` has ID `sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33`. Predicate `achieves_spec` has ID `sha256:c4fe157c9cd173e63c5e0f92ca20e8094a133e170cd385fd86263a3bac6bd9b6`.
 
-The decimal inputs `0.980`, `+0.98`, and `0.9800` normalize to scalar value `0.98`. With evidence ID `sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c`, the scalar assertion ID is `sha256:4661ffcdae95024490714d5f3b9d18435d0689166bf767e59ea5061b89c6e626`.
+The decimal inputs `0.980`, `+0.98`, `00.9800`, and `.98` normalize to scalar value `0.98`. Integer inputs `+001`, `01`, and `1` normalize to `1`. With evidence ID `sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c`, the decimal assertion ID is `sha256:4661ffcdae95024490714d5f3b9d18435d0689166bf767e59ea5061b89c6e626`.
 
 The public M1 fixture must implement all golden vectors in this ADR.
 
