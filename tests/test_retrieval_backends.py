@@ -9,7 +9,11 @@ import pytest
 
 
 def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_backends_mod):
+    invoked = {}
+
     def run_process(_args, _environment):
+        invoked["args"] = _args
+        invoked["environment"] = _environment
         return {
             "stdout": json.dumps(
                 {
@@ -33,6 +37,9 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
         knowledge_base="corpus",
         process_runner=run_process,
         token_counter=lambda _text: 9,
+        config="benchmark-groove.toml",
+        model="bge-small-en-v1.5",
+        model_cache="model-cache",
     )
 
     run = adapter.query("continuous power", limit=5)
@@ -61,6 +68,17 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
     ]
     assert run["latency_ms"] == 12.5
     assert run["peak_working_set_bytes"] == 123_456
+    assert invoked["args"][:8] == [
+        "groove",
+        "search",
+        "continuous power",
+        "--config",
+        "benchmark-groove.toml",
+        "--model",
+        "bge-small-en-v1.5",
+        "--kb-path",
+    ]
+    assert invoked["environment"]["FASTEMBED_CACHE_DIR"] == "model-cache"
 
 
 def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends_mod):
@@ -112,8 +130,10 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
     tmp_path, retrieval_backends_mod
 ):
     document = tmp_path / "auriga-drive.md"
+    invoked = {}
 
     def run_process(_args, _environment):
+        invoked["environment"] = _environment
         return {
             "stdout": json.dumps(
                 [
@@ -138,6 +158,9 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
         corpus_root=tmp_path,
         process_runner=run_process,
         token_counter=lambda _text: 17,
+        index_db=tmp_path / "index.sqlite",
+        config_dir=tmp_path / "config",
+        embed_model=tmp_path / "model.gguf",
     )
 
     run = adapter.query("continuous power", limit=5)
@@ -157,6 +180,57 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
     }
     assert run["latency_ms"] == 25.0
     assert run["peak_working_set_bytes"] == 654_321
+    assert invoked["environment"] == {
+        "INDEX_PATH": str((tmp_path / "index.sqlite").resolve()),
+        "QMD_CONFIG_DIR": str((tmp_path / "config").resolve()),
+        "QMD_EMBED_MODEL": str((tmp_path / "model.gguf").resolve()),
+        "QMD_FORCE_CPU": "1",
+        "XDG_CACHE_HOME": None,
+        "XDG_CONFIG_HOME": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("adapter_name", "payload"),
+    [
+        ("grooveseek", {"error": "index unavailable"}),
+        ("qmd", {"error": "index unavailable"}),
+    ],
+)
+def test_backend_adapters_reject_error_objects(
+    tmp_path, retrieval_backends_mod, adapter_name, payload
+):
+    runner = lambda *_args: {
+        "stdout": json.dumps(payload),
+        "elapsed_ms": 1,
+        "peak_working_set_bytes": 1,
+    }
+    if adapter_name == "grooveseek":
+        adapter = retrieval_backends_mod.GrooveSeekAdapter(
+            executable="groove",
+            knowledge_base="corpus",
+            process_runner=runner,
+            token_counter=lambda _text: 1,
+            config="groove.toml",
+            model="bge-small-en-v1.5",
+            model_cache="model-cache",
+        )
+    else:
+        adapter = retrieval_backends_mod.QmdAdapter(
+            node_executable="node",
+            qmd_script="qmd",
+            index="index",
+            collection="collection",
+            corpus_root=tmp_path,
+            process_runner=runner,
+            token_counter=lambda _text: 1,
+            index_db=tmp_path / "index.sqlite",
+            config_dir=tmp_path / "config",
+            embed_model=tmp_path / "model.gguf",
+        )
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        adapter.query("query", limit=10)
 
 
 def test_run_process_captures_output_latency_and_working_set(retrieval_backends_mod):
@@ -185,6 +259,22 @@ def test_run_process_does_not_expose_backend_stderr(retrieval_backends_mod):
 
     assert str(error.value) == "backend command failed with exit code 7"
     assert private_text not in str(error.value)
+
+
+def test_run_process_can_remove_ambient_backend_variables(
+    monkeypatch, retrieval_backends_mod
+):
+    monkeypatch.setenv("INDEX_PATH", "ambient-private-index")
+    measured = retrieval_backends_mod.run_process(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ.get('INDEX_PATH', 'missing'))",
+        ],
+        {"INDEX_PATH": None},
+    )
+
+    assert measured["stdout"].strip() == "missing"
 
 
 def test_qmd_adapter_redacts_result_paths_outside_corpus(

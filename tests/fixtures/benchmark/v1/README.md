@@ -8,4 +8,4 @@ This synthetic fixture contains no private 2brain data. It tests retrieval adapt
 - `identity-cases/` contains duplicate-heading, Unicode, rename, and deletion cases.
 - `golden-identifiers.json` contains the expected identifiers from ADR-0013.
 
-Each positive record cites its required ADR-0013 evidence IDs and at least one explicit `irrelevant` judgment. Exact text must match one contiguous passage in the named corpus document. The content-addressed benchmark version changes whenever a query, split, or judgment changes.
+Each positive record cites its required ADR-0013 evidence IDs and at least one explicit `irrelevant` judgment. Exact text must match one contiguous passage in the named corpus document. The content-addressed benchmark version changes whenever the corpus, a query, a split, or a judgment changes.

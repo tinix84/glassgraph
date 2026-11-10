@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -50,10 +52,18 @@ def test_backend_settings_identity_changes_when_artifact_bytes_change(
         (tokenizer, "tokenizer-v1"),
         (executable, "executable-v1"),
         (script, "script-v1"),
-        (index, "index-v1"),
-        (groove_index, "groove-index-v1"),
     ):
         path.write_text(value, encoding="utf-8")
+    with sqlite3.connect(groove_index) as connection:
+        connection.execute("CREATE TABLE chunks (value TEXT)")
+        connection.execute("INSERT INTO chunks VALUES ('groove-index-v1')")
+    with sqlite3.connect(index) as connection:
+        connection.execute("CREATE TABLE evidence (value TEXT)")
+        connection.execute("INSERT INTO evidence VALUES ('index-v1')")
+    groove_config = tmp_path / "groove.toml"
+    qmd_config = tmp_path / "fixture.yml"
+    groove_config.write_text("[search]\n", encoding="utf-8")
+    qmd_config.write_text("collections: {}\n", encoding="utf-8")
     args = SimpleNamespace(
         backend=backend,
         limit=10,
@@ -69,11 +79,17 @@ def test_backend_settings_identity_changes_when_artifact_bytes_change(
         retrieval_model_id="fixture-model",
         retrieval_model_artifact=tokenizer,
         backend_config_artifact=[],
+        groove_config=groove_config,
+        qmd_config=qmd_config,
+        qmd_index_db=index,
     )
 
     original = retrieval_benchmark_cli_mod._backend_settings_payload(args)
-    target = executable if backend == "grooveseek" else index
-    target.write_text("replacement-v2", encoding="utf-8")
+    if backend == "grooveseek":
+        executable.write_text("replacement-v2", encoding="utf-8")
+    else:
+        with sqlite3.connect(index) as connection:
+            connection.execute("INSERT INTO evidence VALUES ('replacement-v2')")
     changed = retrieval_benchmark_cli_mod._backend_settings_payload(args)
 
     assert all(
@@ -86,7 +102,7 @@ def test_backend_settings_identity_changes_when_artifact_bytes_change(
     ) != retrieval_benchmark_mod.backend_settings_lock(changed)
 
 
-def test_qmd_settings_identity_binds_effective_embedding_model(
+def test_qmd_settings_identity_ignores_ambient_embedding_model(
     tmp_path,
     monkeypatch,
     retrieval_benchmark_cli_mod,
@@ -109,6 +125,8 @@ def test_qmd_settings_identity_binds_effective_embedding_model(
         retrieval_model_id="model-id",
         retrieval_model_artifact=artifact,
         backend_config_artifact=[],
+        qmd_config=artifact,
+        qmd_index_db=None,
     )
 
     monkeypatch.setenv("QMD_EMBED_MODEL", "model-a")
@@ -118,7 +136,135 @@ def test_qmd_settings_identity_binds_effective_embedding_model(
 
     assert retrieval_benchmark_mod.backend_settings_lock(
         first
-    ) != retrieval_benchmark_mod.backend_settings_lock(second)
+    ) == retrieval_benchmark_mod.backend_settings_lock(second)
+
+
+def test_sqlite_snapshot_hash_includes_committed_wal_rows(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    database = tmp_path / "index.sqlite"
+    connection = sqlite3.connect(database)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("CREATE TABLE evidence (value TEXT)")
+    connection.commit()
+    before = retrieval_benchmark_cli_mod._sqlite_snapshot_sha256(database)
+
+    connection.execute("INSERT INTO evidence VALUES ('new searchable row')")
+    connection.commit()
+    after = retrieval_benchmark_cli_mod._sqlite_snapshot_sha256(database)
+    connection.close()
+
+    assert before != after
+
+
+def test_groove_index_hash_uses_database_next_to_knowledge_base(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    knowledge_base = tmp_path / "corpus"
+    knowledge_base.mkdir()
+    outer = tmp_path / ".groove.db"
+    stale_inner = knowledge_base / ".groove.db"
+    for database, value in ((outer, "outer"), (stale_inner, "inner")):
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE chunks (value TEXT)")
+            connection.execute("INSERT INTO chunks VALUES (?)", (value,))
+    first = retrieval_benchmark_cli_mod._groove_index_sha256(str(knowledge_base))
+
+    with sqlite3.connect(stale_inner) as connection:
+        connection.execute("INSERT INTO chunks VALUES ('stale-change')")
+    assert retrieval_benchmark_cli_mod._groove_index_sha256(
+        str(knowledge_base)
+    ) == first
+
+    with sqlite3.connect(outer) as connection:
+        connection.execute("INSERT INTO chunks VALUES ('effective-change')")
+    assert retrieval_benchmark_cli_mod._groove_index_sha256(
+        str(knowledge_base)
+    ) != first
+
+
+def test_qmd_config_must_use_pinned_model_artifact(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    model = (tmp_path / "model.gguf").resolve()
+    model.write_text("GGUF", encoding="utf-8")
+    config = tmp_path / "fixture.yml"
+    args = SimpleNamespace(
+        qmd_config=config,
+        index="fixture",
+        retrieval_model_artifact=model,
+    )
+
+    config.write_text("collections: {}\n", encoding="utf-8")
+    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+
+    config.write_text(
+        "models:\n  embed: hf:remote/model/file.gguf\n", encoding="utf-8"
+    )
+    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+
+    config.write_text(
+        f"models:\n  embed: {json.dumps(str(model))}\n", encoding="utf-8"
+    )
+    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+
+
+def test_qmd_package_hash_covers_imported_package_files(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    package = tmp_path / "node_modules" / "qmd"
+    script = package / "dist" / "cli" / "qmd.js"
+    imported = package / "dist" / "store.js"
+    script.parent.mkdir(parents=True)
+    (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
+    script.write_text("import '../store.js'", encoding="utf-8")
+    imported.write_text("export const version = 1", encoding="utf-8")
+    before = retrieval_benchmark_cli_mod._qmd_package_sha256(str(script))
+
+    imported.write_text("export const version = 2", encoding="utf-8")
+
+    assert retrieval_benchmark_cli_mod._qmd_package_sha256(str(script)) != before
+
+
+def test_directory_hash_rejects_file_disappearance(
+    tmp_path, monkeypatch, retrieval_benchmark_cli_mod
+):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir()
+    (artifact / "model.bin").write_text("model", encoding="utf-8")
+    monkeypatch.setattr(retrieval_benchmark_cli_mod, "_file_sha256", lambda _path: None)
+
+    with pytest.raises(OSError, match="changed while it was fingerprinted"):
+        retrieval_benchmark_cli_mod._directory_sha256(artifact)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {
+            "id": "q1",
+            "query": "question",
+            "required_groups": [[{
+                "evidence_id": [],
+                "path": "answer.md",
+                "text": "answer",
+                "grade": "direct",
+            }]],
+            "irrelevant": [],
+        },
+        {
+            "id": "q1",
+            "query": "question",
+            "required_groups": [],
+            "irrelevant": None,
+        },
+    ],
+)
+def test_validate_records_rejects_malformed_judgments_without_type_error(
+    record, retrieval_benchmark_cli_mod
+):
+    with pytest.raises(ValueError, match="Benchmark records are invalid"):
+        retrieval_benchmark_cli_mod.validate_records([record])
 
 
 def test_cli_redacts_artifact_fingerprint_failure(
@@ -277,14 +423,16 @@ def _add_manifest(
     corpus_root,
 ):
     privacy = "private" if "records" in payload else "public"
-    payload["benchmark_version"] = retrieval_benchmark_mod.benchmark_version(
-        privacy, records
-    )
     payload["manifest"] = _manifest(
         records,
         retrieval_benchmark_mod,
         split_membership,
         corpus_root,
+    )
+    payload["benchmark_version"] = retrieval_benchmark_mod.benchmark_version(
+        privacy,
+        records,
+        payload["manifest"]["corpus_snapshot_hash"],
     )
     return payload
 
@@ -595,10 +743,7 @@ def test_cli_redacts_expected_backend_failures(
                 str(queries_path),
                 "--backend",
                 "grooveseek",
-                "--groove-executable",
-                "groove",
-                "--knowledge-base",
-                "corpus",
+                *_public_groove_args(tmp_path, corpus_root),
                 "--privacy",
                 "public",
                 "--benchmark-corpus-root",
@@ -681,15 +826,22 @@ def _private_args(workbook_path, output_path, corpus_root):
     artifact_root.mkdir(exist_ok=True)
     executable = artifact_root / "groove.exe"
     tokenizer = artifact_root / "tokenizer.json"
-    model = artifact_root / "embedding-model.bin"
+    model = artifact_root / "fastembed-cache"
+    model.mkdir(exist_ok=True)
+    model_file = model / "embedding-model.bin"
+    groove_config = artifact_root / "groove.toml"
     groove_index = corpus_root.parent / ".groove.db"
     for path, content in (
         (executable, "groove-test-binary"),
         (tokenizer, "tokenizer-test-data"),
-        (model, "model-test-data"),
-        (groove_index, "index-test-data"),
+        (model_file, "model-test-data"),
+        (groove_config, "[search]\n"),
     ):
         path.write_text(content, encoding="utf-8")
+    if not groove_index.exists():
+        with sqlite3.connect(groove_index) as connection:
+            connection.execute("CREATE TABLE evidence (value TEXT)")
+            connection.execute("INSERT INTO evidence VALUES ('index-test-data')")
     return [
         "--queries",
         str(workbook_path),
@@ -699,6 +851,8 @@ def _private_args(workbook_path, output_path, corpus_root):
         str(executable),
         "--knowledge-base",
         str(corpus_root),
+        "--groove-config",
+        str(groove_config),
         "--tokenizer",
         str(tokenizer),
         "--retrieval-model-id",
@@ -716,6 +870,69 @@ def _private_args(workbook_path, output_path, corpus_root):
         "--benchmark-corpus-root",
         str(corpus_root),
         *MEASUREMENT_ARGS,
+    ]
+
+
+def _public_groove_args(tmp_path, corpus_root):
+    artifact_root = tmp_path / "public-groove-artifacts"
+    model_cache = artifact_root / "fastembed-cache"
+    model_cache.mkdir(parents=True)
+    executable = artifact_root / "groove.exe"
+    config = artifact_root / "groove.toml"
+    tokenizer = artifact_root / "tokenizer.json"
+    for path, content in (
+        (model_cache / "model.bin", "model"),
+        (executable, "executable"),
+        (config, "[search]\n"),
+        (tokenizer, "tokenizer"),
+    ):
+        path.write_text(content, encoding="utf-8")
+    with sqlite3.connect(corpus_root.parent / ".groove.db") as connection:
+        connection.execute("CREATE TABLE IF NOT EXISTS chunks (value TEXT)")
+        connection.execute("INSERT INTO chunks VALUES ('fixture')")
+    return [
+        "--groove-executable", str(executable),
+        "--groove-config", str(config),
+        "--knowledge-base", str(corpus_root),
+        "--tokenizer", str(tokenizer),
+        "--retrieval-model-id", "bge-small-en-v1.5",
+        "--retrieval-model-artifact", str(model_cache),
+    ]
+
+
+def _public_qmd_args(tmp_path, corpus_root):
+    artifact_root = tmp_path / "public-qmd-artifacts"
+    package = artifact_root / "qmd-package"
+    script = package / "dist" / "cli" / "qmd.js"
+    script.parent.mkdir(parents=True)
+    (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
+    script.write_text("// fixture", encoding="utf-8")
+    node = artifact_root / "node.exe"
+    tokenizer = artifact_root / "tokenizer.json"
+    model = artifact_root / "model.gguf"
+    config = artifact_root / "fixture.yml"
+    index_db = artifact_root / "index.sqlite"
+    for path, content in (
+        (node, "node"),
+        (tokenizer, "tokenizer"),
+        (model, "GGUF fixture"),
+        (config, "collections:\n  fixture:\n    path: .\n"),
+    ):
+        path.write_text(content, encoding="utf-8")
+    with sqlite3.connect(index_db) as connection:
+        connection.execute("CREATE TABLE chunks (value TEXT)")
+        connection.execute("INSERT INTO chunks VALUES ('fixture')")
+    return [
+        "--node-executable", str(node),
+        "--qmd-script", str(script),
+        "--qmd-config", str(config),
+        "--qmd-index-db", str(index_db),
+        "--index", "fixture",
+        "--collection", "fixture",
+        "--corpus-root", str(corpus_root),
+        "--tokenizer", str(tokenizer),
+        "--retrieval-model-id", "fixture-model",
+        "--retrieval-model-artifact", str(model),
     ]
 
 
@@ -769,10 +986,7 @@ def test_public_cli_prints_aggregate_only(
             str(queries_path),
             "--backend",
             "grooveseek",
-            "--groove-executable",
-            "groove",
-            "--knowledge-base",
-            "corpus",
+            *_public_groove_args(tmp_path, corpus_root),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -788,12 +1002,69 @@ def test_public_cli_prints_aggregate_only(
     assert exit_code == 0
     assert payload["schema_version"] == 1
     assert payload["backend"] == "grooveseek"
+    assert payload["benchmark"]["corpus_snapshot_hash"] == (
+        retrieval_benchmark_mod.corpus_snapshot_hash(corpus_root)
+    )
     assert payload["summary"]["group_recall_at_5"] == 1.0
     assert payload["measurements"]["full_build_time_ms"] == 200
     assert payload["measurements"]["derived_index_size_bytes"] == 4096
     assert payload["measurements"]["offline_verified"] is True
     assert "PRIVATE QUERY TEXT" not in output
     assert "answer.md" not in output
+
+
+def test_cli_rejects_artifacts_changed_during_execution(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    queries = _public_queries()
+    corpus_root = _write_corpus(tmp_path)
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(
+        json.dumps(
+            _add_manifest(
+                {"schema_version": 1, "queries": queries},
+                queries,
+                retrieval_benchmark_mod,
+                {"public": [query["id"] for query in queries]},
+                corpus_root,
+            )
+        ),
+        encoding="utf-8",
+    )
+    backend_args = _public_groove_args(tmp_path, corpus_root)
+    config = Path(backend_args[backend_args.index("--groove-config") + 1])
+    changed = False
+
+    def run_process(_args, _environment):
+        nonlocal changed
+        if not changed:
+            config.write_text("[search]\nmmr = true\n", encoding="utf-8")
+            changed = True
+        return {
+            "stdout": json.dumps({"results": [], "low_confidence": False}),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        }
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "grooveseek",
+                *backend_args,
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=run_process,
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert "artifacts changed during execution" in capsys.readouterr().err
 
 
 def test_public_cli_executes_queries_in_canonical_id_order(
@@ -830,10 +1101,7 @@ def test_public_cli_executes_queries_in_canonical_id_order(
             str(queries_path),
             "--backend",
             "grooveseek",
-            "--groove-executable",
-            "groove",
-            "--knowledge-base",
-            "corpus",
+            *_public_groove_args(tmp_path, corpus_root),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -1030,16 +1298,7 @@ def test_public_cli_runs_qmd_adapter(
             str(queries_path),
             "--backend",
             "qmd",
-            "--node-executable",
-            "node",
-            "--qmd-script",
-            "qmd",
-            "--index",
-            "glassgraph-m1-public",
-            "--collection",
-            "glassgraph-m1-public",
-            "--corpus-root",
-            str(corpus_root),
+            *_public_qmd_args(tmp_path, corpus_root),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -1077,11 +1336,7 @@ def test_cli_redacts_qmd_out_of_corpus_path(
             [
                 "--queries", str(queries_path),
                 "--backend", "qmd",
-                "--node-executable", "node",
-                "--qmd-script", "qmd",
-                "--index", "glassgraph-test",
-                "--collection", "glassgraph-test",
-                "--corpus-root", str(corpus_root),
+                *_public_qmd_args(tmp_path, corpus_root),
                 "--privacy", "public",
                 "--benchmark-corpus-root", str(corpus_root),
                 *MEASUREMENT_ARGS,
@@ -1423,10 +1678,7 @@ def test_public_report_does_not_copy_manifest_details(
             str(queries_path),
             "--backend",
             "grooveseek",
-            "--groove-executable",
-            "groove",
-            "--knowledge-base",
-            "corpus",
+            *_public_groove_args(tmp_path, corpus_root),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -1512,7 +1764,7 @@ def test_cli_redacts_private_evidence_validation_failures(
         )
     records = payload["records"]
     payload["benchmark_version"] = retrieval_benchmark_mod.benchmark_version(
-        "private", records
+        "private", records, payload["manifest"]["corpus_snapshot_hash"]
     )
     payload["manifest"] = _manifest(
         records,

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "benchmark_version": "public-v1-197cfaac134a",
+  "benchmark_version": "public-v1-145f8d0ef292",
   "description": "Glassgraph v1 synthetic evidence retrieval benchmark",
   "manifest": {
     "schema_version": 1,

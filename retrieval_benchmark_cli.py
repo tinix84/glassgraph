@@ -5,14 +5,15 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import re
 import shutil
+import sqlite3
 from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from tokenizers import Tokenizer
+import yaml
 
 import retrieval_backends
 import retrieval_benchmark
@@ -77,16 +78,21 @@ def _file_sha256(path: Path | None) -> str | None:
 def _directory_sha256(path: Path | None) -> str | None:
     if path is None or not path.is_dir():
         return None
-    files = sorted(item for item in path.rglob("*") if item.is_file())
+    files = sorted(
+        (item for item in path.rglob("*") if item.is_file()),
+        key=lambda item: item.relative_to(path).as_posix(),
+    )
     if not files:
         return None
     digest = hashlib.sha256()
     for item in files:
         relative = item.relative_to(path).as_posix().encode("utf-8")
-        file_hash = _file_sha256(item).encode("ascii")
+        file_hash = _file_sha256(item)
+        if file_hash is None:
+            raise OSError("Artifact changed while it was fingerprinted")
         digest.update(relative)
         digest.update(b"\0")
-        digest.update(file_hash)
+        digest.update(file_hash.encode("ascii"))
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 
@@ -101,37 +107,34 @@ def _executable_sha256(value: str | None) -> str | None:
     return _file_sha256(candidate)
 
 
+def _sqlite_snapshot_sha256(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    uri = f"file:{path.resolve().as_posix()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as connection:
+        snapshot = connection.serialize()
+    return "sha256:" + hashlib.sha256(snapshot).hexdigest()
+
+
 def _groove_index_sha256(value: str | None) -> str | None:
     if not value:
         return None
     root = Path(value)
-    if root.is_file():
-        return _file_sha256(root)
-    for candidate in (root / ".groove.db", root.parent / ".groove.db"):
-        fingerprint = _file_sha256(candidate)
-        if fingerprint:
-            return fingerprint
-    return None
+    return _sqlite_snapshot_sha256(root.resolve().parent / ".groove.db")
 
 
 def _qmd_package_sha256(value: str | None) -> str | None:
     if not value:
         return None
-    script = Path(value)
-    package_root = script.parent.parent
-    if (package_root / "package.json").is_file():
-        return _directory_sha256(package_root)
+    script = Path(value).resolve()
+    for package_root in script.parents:
+        if (package_root / "package.json").is_file():
+            return _directory_sha256(package_root)
     return _file_sha256(script)
 
 
-def _qmd_index_sha256(value: str | None) -> str | None:
-    if not value:
-        return None
-    direct = Path(value)
-    if direct.is_file():
-        return _file_sha256(direct)
-    cached = Path.home() / ".cache" / "qmd" / f"{value}.sqlite"
-    return _file_sha256(cached)
+def _qmd_index_sha256(value: Path | None) -> str | None:
+    return _sqlite_snapshot_sha256(value)
 
 
 def _path_sha256(path: Path | None) -> str | None:
@@ -161,16 +164,21 @@ def _backend_settings_payload(args) -> dict:
         },
     }
     if args.backend == "grooveseek":
+        groove_config = getattr(args, "groove_config", None)
         return {
             **common,
             "executable": args.groove_executable,
             "knowledge_base": args.knowledge_base,
+            "groove_config": str(groove_config) if groove_config else None,
             "artifact_hashes": {
                 **common["artifact_hashes"],
                 "executable": _executable_sha256(args.groove_executable),
+                "groove_config": _file_sha256(groove_config),
                 "index": _groove_index_sha256(args.knowledge_base),
             },
         }
+    qmd_config = getattr(args, "qmd_config", None)
+    qmd_index_db = getattr(args, "qmd_index_db", None)
     return {
         **common,
         "node_executable": args.node_executable,
@@ -178,14 +186,35 @@ def _backend_settings_payload(args) -> dict:
         "index": args.index,
         "collection": args.collection,
         "corpus_root": str(args.corpus_root) if args.corpus_root else None,
-        "qmd_embed_model": os.environ.get("QMD_EMBED_MODEL"),
+        "qmd_config": str(qmd_config) if qmd_config else None,
+        "qmd_index_db": str(qmd_index_db) if qmd_index_db else None,
         "artifact_hashes": {
             **common["artifact_hashes"],
             "node_executable": _executable_sha256(args.node_executable),
             "qmd_package": _qmd_package_sha256(args.qmd_script),
-            "index": _qmd_index_sha256(args.index),
+            "qmd_config": _file_sha256(qmd_config),
+            "index": _qmd_index_sha256(qmd_index_db),
         },
     }
+
+
+def _qmd_config_uses_model_artifact(args) -> bool:
+    if args.qmd_config.name != f"{args.index}.yml":
+        return False
+    payload = yaml.safe_load(args.qmd_config.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return False
+    models = payload.get("models") or {}
+    if not isinstance(models, dict):
+        return False
+    configured = models.get("embed")
+    if configured is None:
+        return True
+    configured_path = Path(str(configured)).expanduser()
+    return (
+        configured_path.is_absolute()
+        and configured_path.resolve() == args.retrieval_model_artifact.resolve()
+    )
 
 
 def validate_private_workbook(payload: dict) -> None:
@@ -257,14 +286,14 @@ def validate_records(records: list[dict]) -> None:
             invalid_records += 1
             continue
         relevant_ids = {
-            judgment.get("evidence_id")
+            str(judgment.get("evidence_id"))
             for group in groups
             if isinstance(group, list)
             for judgment in group
             if isinstance(judgment, dict)
         }
         irrelevant_ids = {
-            judgment.get("evidence_id")
+            str(judgment.get("evidence_id"))
             for judgment in irrelevant or []
             if isinstance(judgment, dict)
         }
@@ -272,6 +301,7 @@ def validate_records(records: list[dict]) -> None:
             isinstance(record.get("query"), str)
             and bool(record["query"].strip())
             and isinstance(groups, list)
+            and not ("irrelevant" in record and irrelevant is None)
             and relevant_ids.isdisjoint(irrelevant_ids)
             and (
                 (
@@ -303,9 +333,6 @@ def validate_manifest(
     manifest = payload.get("manifest")
     if not isinstance(manifest, dict):
         raise ValueError("The benchmark manifest is missing")
-    expected_version = retrieval_benchmark.benchmark_version(privacy, records)
-    if payload.get("benchmark_version") != expected_version:
-        raise ValueError("The benchmark version is invalid")
     if payload.get("schema_version") != 1 or manifest.get("schema_version") != 1:
         raise ValueError("The benchmark schema version must be 1")
     if not SHA256_PATTERN.fullmatch(str(manifest.get("corpus_snapshot_hash") or "")):
@@ -316,6 +343,13 @@ def validate_manifest(
         raise ValueError("The benchmark corpus cannot be verified") from error
     if manifest["corpus_snapshot_hash"] != current_corpus_hash:
         raise ValueError("The benchmark corpus snapshot hash does not match")
+    expected_version = retrieval_benchmark.benchmark_version(
+        privacy,
+        records,
+        current_corpus_hash,
+    )
+    if payload.get("benchmark_version") != expected_version:
+        raise ValueError("The benchmark version is invalid")
     if manifest.get("query_set_hash") != retrieval_benchmark.query_set_hash(records):
         raise ValueError("The benchmark query-set hash does not match")
     if manifest.get("judgment_set_hash") != retrieval_benchmark.judgment_set_hash(records):
@@ -346,9 +380,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--groove-executable")
+    parser.add_argument("--groove-config", type=Path)
     parser.add_argument("--knowledge-base")
     parser.add_argument("--node-executable")
     parser.add_argument("--qmd-script")
+    parser.add_argument("--qmd-config", type=Path)
+    parser.add_argument("--qmd-index-db", type=Path)
     parser.add_argument("--index")
     parser.add_argument("--collection")
     parser.add_argument("--corpus-root", type=Path)
@@ -423,13 +460,8 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         parser.error("Production benchmark runs require --tokenizer")
     try:
         settings_identity = _backend_settings_payload(args)
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError, sqlite3.Error):
         parser.error("Benchmark artifacts could not be fingerprinted")
-    if args.privacy == "private" and any(
-        not fingerprint
-        for fingerprint in settings_identity["artifact_hashes"].values()
-    ):
-        parser.error("Private benchmark artifact fingerprints are incomplete")
     actual_settings_lock = retrieval_benchmark.backend_settings_lock(
         settings_identity
     )
@@ -470,6 +502,42 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         )
     except (OSError, UnicodeError, ValueError):
         parser.error("Benchmark evidence verification failed")
+    if not args.retrieval_model_id or args.retrieval_model_artifact is None:
+        parser.error(
+            "Benchmarks require --retrieval-model-id and "
+            "--retrieval-model-artifact"
+        )
+    if args.backend == "grooveseek" and (
+        args.groove_config is None
+        or not args.retrieval_model_artifact.is_dir()
+    ):
+        parser.error(
+            "GrooveSeek benchmarks require --groove-config and "
+            "a model-cache directory"
+        )
+    if args.backend == "qmd" and (
+        args.qmd_config is None
+        or args.qmd_index_db is None
+        or not args.retrieval_model_artifact.is_file()
+    ):
+        parser.error(
+            "QMD benchmarks require --qmd-config, --qmd-index-db, "
+            "and a model file"
+        )
+    if args.backend == "qmd":
+        try:
+            model_is_pinned = _qmd_config_uses_model_artifact(args)
+        except (OSError, UnicodeError, yaml.YAMLError):
+            parser.error("The QMD benchmark configuration is invalid")
+        if not model_is_pinned:
+            parser.error(
+                "The QMD configuration must use the pinned model artifact"
+            )
+    if any(
+        not fingerprint
+        for fingerprint in settings_identity["artifact_hashes"].values()
+    ):
+        parser.error("Benchmark artifact fingerprints are incomplete")
     if args.privacy == "private" and args.split == "evaluation":
         locked_settings = payload.get("manifest", {}).get(
             "locked_backend_settings"
@@ -506,6 +574,9 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             process_runner=process_runner,
             token_counter=token_counter,
             path_prefix=args.path_prefix,
+            config=args.groove_config,
+            model=args.retrieval_model_id,
+            model_cache=args.retrieval_model_artifact,
         )
     else:
         adapter = retrieval_backends.QmdAdapter(
@@ -517,6 +588,9 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             process_runner=process_runner,
             token_counter=token_counter,
             path_prefix=args.path_prefix,
+            index_db=args.qmd_index_db,
+            config_dir=(args.qmd_config.parent if args.qmd_config else None),
+            embed_model=args.retrieval_model_artifact,
         )
 
     try:
@@ -535,6 +609,12 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     ):
         parser.error("Retrieval backend execution failed")
     try:
+        final_settings_identity = _backend_settings_payload(args)
+    except (OSError, UnicodeError, sqlite3.Error):
+        parser.error("Benchmark artifacts could not be fingerprinted")
+    if final_settings_identity != settings_identity:
+        parser.error("Benchmark artifacts changed during execution")
+    try:
         retrieval_benchmark.verify_evidence_hits(
             queries,
             runs,
@@ -551,6 +631,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         "query_count": len(queries),
         "benchmark": {
             "version": payload["benchmark_version"],
+            "corpus_snapshot_hash": payload["manifest"]["corpus_snapshot_hash"],
             "corpus_verified": True,
             "settings_lock": actual_settings_lock,
             "artifact_hashes": settings_identity["artifact_hashes"],

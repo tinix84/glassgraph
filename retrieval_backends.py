@@ -27,10 +27,14 @@ def _with_prefix(path: str, prefix: str | None) -> str:
     return f"{safe_prefix}/{relative}"
 
 
-def run_process(args: list[str], environment: dict[str, str]) -> dict:
+def run_process(args: list[str], environment: dict[str, str | None]) -> dict:
     """Run one backend command and measure its process-tree working set."""
     process_environment = os.environ.copy()
-    process_environment.update(environment)
+    for name, value in environment.items():
+        if value is None:
+            process_environment.pop(name, None)
+        else:
+            process_environment[name] = value
     started = time.perf_counter()
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         process = psutil.Popen(
@@ -81,28 +85,50 @@ class GrooveSeekAdapter:
         process_runner,
         token_counter,
         path_prefix: str | None = None,
+        config: str | Path | None = None,
+        model: str | None = None,
+        model_cache: str | Path | None = None,
     ) -> None:
         self.executable = executable
         self.knowledge_base = knowledge_base
         self.process_runner = process_runner
         self.token_counter = token_counter
         self.path_prefix = path_prefix
+        self.config = str(config) if config is not None else None
+        self.model = model
+        self.model_cache = str(model_cache) if model_cache is not None else None
 
     def query(self, text: str, *, limit: int) -> dict:
         command = [
             self.executable,
             "search",
             text,
-            "--kb-path",
-            self.knowledge_base,
+        ]
+        if self.config is not None:
+            command.extend(["--config", self.config])
+        if self.model is not None:
+            command.extend(["--model", self.model])
+        command.extend([
+            "--kb-path", self.knowledge_base,
             "--limit",
             str(limit),
             "--format",
             "json",
             "--include-low-quality",
-        ]
-        measured = self.process_runner(command, {})
+        ])
+        environment = (
+            {"FASTEMBED_CACHE_DIR": self.model_cache}
+            if self.model_cache is not None
+            else {}
+        )
+        measured = self.process_runner(command, environment)
         payload = json.loads(measured["stdout"])
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("results"), list)
+            or any(not isinstance(hit, dict) for hit in payload["results"])
+        ):
+            raise RuntimeError("GrooveSeek returned an invalid response")
         raw_hits = []
         for hit in payload.get("results", []):
             content = str(hit.get("content") or "")
@@ -151,6 +177,9 @@ class QmdAdapter:
         process_runner,
         token_counter,
         path_prefix: str | None = None,
+        index_db: str | Path | None = None,
+        config_dir: str | Path | None = None,
+        embed_model: str | Path | None = None,
     ) -> None:
         self.node_executable = node_executable
         self.qmd_script = qmd_script
@@ -160,6 +189,15 @@ class QmdAdapter:
         self.process_runner = process_runner
         self.token_counter = token_counter
         self.path_prefix = path_prefix
+        self.index_db = (
+            str(Path(index_db).resolve()) if index_db is not None else None
+        )
+        self.config_dir = (
+            str(Path(config_dir).resolve()) if config_dir is not None else None
+        )
+        self.embed_model = (
+            str(Path(embed_model).resolve()) if embed_model is not None else None
+        )
 
     def query(self, text: str, *, limit: int) -> dict:
         structured_query = f"lex: {text}\nvec: {text}"
@@ -180,8 +218,23 @@ class QmdAdapter:
             "--full-path",
             "--explain",
         ]
-        measured = self.process_runner(command, {"QMD_FORCE_CPU": "1"})
+        environment = {"QMD_FORCE_CPU": "1"}
+        if self.index_db is not None:
+            environment.update(
+                {
+                    "INDEX_PATH": self.index_db,
+                    "QMD_CONFIG_DIR": self.config_dir,
+                    "QMD_EMBED_MODEL": self.embed_model,
+                    "XDG_CACHE_HOME": None,
+                    "XDG_CONFIG_HOME": None,
+                }
+            )
+        measured = self.process_runner(command, environment)
         payload = json.loads(measured["stdout"])
+        if not isinstance(payload, list) or any(
+            not isinstance(hit, dict) for hit in payload
+        ):
+            raise RuntimeError("QMD returned an invalid response")
         raw_hits = []
         for hit in payload:
             content = str(hit.get("snippet") or "")

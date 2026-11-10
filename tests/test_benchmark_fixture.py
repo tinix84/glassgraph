@@ -252,7 +252,7 @@ def test_public_benchmark_manifest_matches_frozen_inputs(retrieval_benchmark_mod
     assert manifest["query_set_hash"] == retrieval_benchmark_mod.query_set_hash(queries)
     assert manifest["judgment_set_hash"] == retrieval_benchmark_mod.judgment_set_hash(queries)
     assert payload["benchmark_version"] == retrieval_benchmark_mod.benchmark_version(
-        "public", queries
+        "public", queries, manifest["corpus_snapshot_hash"]
     )
     assert manifest["split_membership"] == {
         "public": [query["id"] for query in queries]
@@ -271,6 +271,24 @@ def test_corpus_snapshot_hash_normalizes_checkout_line_endings(
 
     assert retrieval_benchmark_mod.corpus_snapshot_hash(crlf_root) == (
         retrieval_benchmark_mod.corpus_snapshot_hash(FIXTURE / "corpus")
+    )
+
+
+def test_corpus_snapshot_hash_uses_platform_neutral_path_order(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "B.md").write_text("B\n", encoding="utf-8")
+    (tmp_path / "a.md").write_text("a\n", encoding="utf-8")
+    documents = [
+        {
+            "path": path,
+            "sha256": "sha256:" + hashlib.sha256(body.encode()).hexdigest(),
+        }
+        for path, body in (("B.md", "B\n"), ("a.md", "a\n"))
+    ]
+
+    assert retrieval_benchmark_mod.corpus_snapshot_hash(tmp_path) == _identifier(
+        "glassgraph:benchmark-corpus:v1", documents
     )
 
 

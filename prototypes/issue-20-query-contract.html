@@ -153,7 +153,16 @@
         return {
           result_id:'result:1', kind:'passage_candidate', rank:1,
           score:{ normalized:null, backend:{ adapter:capabilities[backend].adapter, kind:trace.score_kind, raw:trace.raw_score } },
-          backend_trace:{ locator_kind:trace.locator_kind, path:'wiki/example.md', heading_path:['Results'], line:8, passage:'Efficiency is 98%.\n', source_document_hash:verifiedEvidence.source_document_hash, raw_preserved:true },
+          backend_trace:{
+            locator_kind:trace.locator_kind,
+            path:'wiki/example.md',
+            heading_path:['Results'],
+            line:8,
+            match_spans:backend === 'groove' ? [{ start:0, end:19 }] : null,
+            passage:'Efficiency is 98%.\n',
+            source_document_hash:verifiedEvidence.source_document_hash,
+            raw_preserved:true
+          },
           evidence:{ status:indexState === 'stale' ? 'stale' : 'unverified', evidence_id:null, locator:null, verification_error:indexState === 'stale' ? 'source_hash_mismatch' : null }
         };
       }

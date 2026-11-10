@@ -139,6 +139,36 @@ def test_evaluate_reports_exact_evidence_span_accuracy(retrieval_benchmark_mod):
     assert report["evidence_span_accuracy"] == 0.5
 
 
+def test_evaluate_counts_each_verified_alternative_span(
+    retrieval_benchmark_mod,
+):
+    queries = [{
+        "id": "q1",
+        "required_groups": [[
+            {
+                "evidence_id": "e-a",
+                "path": "a.md",
+                "text": "Alternative A",
+                "grade": "direct",
+            },
+            {
+                "evidence_id": "e-b",
+                "path": "b.md",
+                "text": "Alternative B",
+                "grade": "direct",
+            },
+        ]],
+    }]
+    runs = {"q1": {"hits": [
+        {"evidence_ids": ["e-a"], "path": "a.md", "text": "Alternative A"},
+        {"evidence_ids": ["e-b"], "path": "b.md", "text": "Alternative B"},
+    ]}}
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["evidence_span_accuracy"] == 1.0
+
+
 def test_evaluate_reports_context_and_explanation_density(retrieval_benchmark_mod):
     queries = [
         {"id": "n1", "query": "Alpha", "required_groups": []},
@@ -517,12 +547,30 @@ def test_benchmark_version_changes_with_judgment_correction(retrieval_benchmark_
         "irrelevant": [{"evidence_id": "sha256:" + "1" * 64}],
     }]
 
-    original_version = retrieval_benchmark_mod.benchmark_version("public", original)
-    corrected_version = retrieval_benchmark_mod.benchmark_version("public", corrected)
+    corpus_hash = "sha256:" + "a" * 64
+    original_version = retrieval_benchmark_mod.benchmark_version(
+        "public", original, corpus_hash
+    )
+    corrected_version = retrieval_benchmark_mod.benchmark_version(
+        "public", corrected, corpus_hash
+    )
 
     assert original_version.startswith("public-v1-")
     assert corrected_version.startswith("public-v1-")
     assert corrected_version != original_version
+
+
+def test_benchmark_version_changes_with_corpus_snapshot(retrieval_benchmark_mod):
+    records = [{"id": "q1", "required_groups": []}]
+
+    first = retrieval_benchmark_mod.benchmark_version(
+        "public", records, "sha256:" + "a" * 64
+    )
+    second = retrieval_benchmark_mod.benchmark_version(
+        "public", records, "sha256:" + "b" * 64
+    )
+
+    assert first != second
 
 
 @pytest.mark.parametrize(
@@ -544,8 +592,10 @@ def test_benchmark_version_changes_with_query_or_split_identity(
     changed = [{**original[0], **change}]
 
     assert retrieval_benchmark_mod.benchmark_version(
-        "private", original
-    ) != retrieval_benchmark_mod.benchmark_version("private", changed)
+        "private", original, "sha256:" + "a" * 64
+    ) != retrieval_benchmark_mod.benchmark_version(
+        "private", changed, "sha256:" + "a" * 64
+    )
 
 
 def test_backend_settings_lock_changes_with_retrieval_cutoff(retrieval_benchmark_mod):
@@ -646,20 +696,32 @@ def test_derive_evidence_returns_original_utf8_byte_span(
     assert records[0]["utf8_byte_end"] == source.index(passage) + len(passage)
 
 
-def test_derive_evidence_byte_span_covers_reordered_combining_sequence(
+def test_derive_evidence_rejects_inexact_reordered_combining_boundary(
     tmp_path, retrieval_benchmark_mod
 ):
     combining_sequence = "a\u0315\u0300"
     source = f"{combining_sequence}x\n".encode("utf-8")
     (tmp_path / "answer.md").write_bytes(source)
 
-    records = retrieval_benchmark_mod.derive_evidence_records(
-        tmp_path,
-        {"path": "answer.md", "text": "à"},
+    with pytest.raises(ValueError, match="exact source interval"):
+        retrieval_benchmark_mod.derive_evidence_records(
+            tmp_path,
+            {"path": "answer.md", "text": "à"},
+        )
+
+
+def test_derive_evidence_rejects_non_markdown_document(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "outside-snapshot.json").write_text(
+        '{"answer":"mutable"}', encoding="utf-8"
     )
 
-    assert records[0]["utf8_byte_start"] == 0
-    assert records[0]["utf8_byte_end"] == len(combining_sequence.encode("utf-8"))
+    with pytest.raises(ValueError, match="frozen Markdown corpus"):
+        retrieval_benchmark_mod.derive_evidence_records(
+            tmp_path,
+            {"path": "outside-snapshot.json", "text": "mutable"},
+        )
 
 
 def test_derive_evidence_counts_overlapping_identical_passages(

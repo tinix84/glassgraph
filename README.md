@@ -46,11 +46,12 @@ python retrieval_benchmark_cli.py `
   --queries tests/fixtures/benchmark/v1/queries.json `
   --backend grooveseek `
   --groove-executable <groove-command> `
+  --groove-config <frozen-groove.toml> `
   --knowledge-base <fixture-index> `
   --benchmark-corpus-root tests/fixtures/benchmark/v1/corpus `
   --tokenizer <pinned-tokenizer.json> `
   --retrieval-model-id <model-uri-or-version> `
-  --retrieval-model-artifact <cached-model-file-or-directory> `
+  --retrieval-model-artifact <fastembed-cache-directory> `
   --privacy public `
   --setup-time-ms <milliseconds> `
   --full-build-time-ms <milliseconds> `
@@ -67,11 +68,12 @@ python retrieval_benchmark_cli.py `
   --queries <private-authoring-workbook.json> `
   --backend grooveseek `
   --groove-executable <groove-command> `
+  --groove-config <frozen-groove.toml> `
   --knowledge-base <private-index> `
   --benchmark-corpus-root <frozen-private-corpus-copy> `
   --tokenizer <pinned-tokenizer.json> `
   --retrieval-model-id <model-uri-or-version> `
-  --retrieval-model-artifact <cached-model-file-or-directory> `
+  --retrieval-model-artifact <fastembed-cache-directory> `
   --path-prefix wiki `
   --privacy private `
   --split development `
@@ -86,9 +88,13 @@ python retrieval_benchmark_cli.py `
 
 The query file contains the frozen manifest and ADR-0013 evidence IDs. Each positive record keeps required `direct` or `supporting` judgments separate from an explicit nonempty `irrelevant` list. The command derives every identity again from the frozen Markdown. It verifies the NFC- and LF-normalized corpus snapshot. It rejects stale manifest hashes or split maps. Line-ending-only and canonically equivalent Unicode changes do not change the corpus snapshot hash.
 
-Benchmark versions are content-addressed as `public-v1-<identity-hash>` or `private-v1-<identity-hash>`. The identity covers both the frozen query set and the judgment set. A query, split, or judgment correction therefore requires a new version. Result limits below 10 are rejected because the report publishes Recall@10 and nDCG@10.
+Benchmark versions are content-addressed as `public-v1-<identity-hash>` or `private-v1-<identity-hash>`. The identity covers the frozen corpus, query set, and judgment set. A corpus, query, split, or judgment correction therefore requires a new version. Result limits below 10 are rejected because the report publishes Recall@10 and nDCG@10.
 
-Development runs can tune settings. Each report records a settings hash derived from the backend, result limit, path prefix, tokenizer reference, retrieval-model identity, and backend-specific index or executable arguments. The settings identity includes content hashes for the tokenizer, retrieval model, backend executable or package, and derived index. Repeat `--backend-config-artifact` for extra model or backend configuration files. Private runs reject unresolved artifact fingerprints. The report records all artifact hashes. Before a private evaluation run, store the selected development hash under `manifest.locked_backend_settings.<backend>`. Pass the same value with `--settings-lock`. The runner recomputes the hash. It rejects an evaluation when the lock is missing, different, or paired with changed settings.
+Development runs can tune settings. Each report records a settings hash derived from the backend, result limit, path prefix, tokenizer reference, retrieval-model identity, and backend-specific index or executable arguments. The settings identity includes content hashes for the tokenizer, retrieval model, backend executable or package, and derived index. Repeat `--backend-config-artifact` for extra model or backend configuration files. All runs reject unresolved artifact fingerprints. The report records all artifact hashes. Before a private evaluation run, store the selected development hash under `manifest.locked_backend_settings.<backend>`. Pass the same value with `--settings-lock`. The runner recomputes the hash. It rejects an evaluation when the lock is missing, different, or paired with changed settings.
+
+GrooveSeek runs pass the pinned model with `--model`. They also set `FASTEMBED_CACHE_DIR` to the fingerprinted model-cache directory. This overrides an embedding provider in the GrooveSeek configuration.
+
+QMD runs require `--qmd-config <index-name>.yml` and `--qmd-index-db <index.sqlite>`. The runner pins `INDEX_PATH` and `QMD_CONFIG_DIR`. It passes the fingerprinted model file as `QMD_EMBED_MODEL`. If the QMD configuration declares `models.embed`, that value must be the same absolute model-file path.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 

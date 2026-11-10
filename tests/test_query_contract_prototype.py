@@ -41,7 +41,11 @@ const expected = {json.dumps(expected)};
 
 const fresh = QueryContract.verify(QueryContract.execute('groove', 'fresh', 'search'));
 const evidence = fresh.results[0].evidence;
+const backendTrace = fresh.results[0].backend_trace;
 if (fresh.results[0].kind !== 'evidence_hit') throw new Error('fresh hit was not verified');
+if (backendTrace.locator_kind !== 'utf8_match_span') throw new Error('wrong backend locator kind');
+if (!Array.isArray(backendTrace.match_spans) || backendTrace.match_spans.length !== 1) throw new Error('backend match spans were not preserved');
+if (backendTrace.match_spans[0].start !== 0 || backendTrace.match_spans[0].end !== Buffer.byteLength(backendTrace.passage, 'utf8')) throw new Error('backend match span mismatch');
 if (evidence.source_document_hash !== expected.source_hash) throw new Error('source hash mismatch');
 if (evidence.locator.lines.start !== expected.line_start) throw new Error('line mismatch');
 if (evidence.locator.utf8_bytes.start !== expected.byte_start) throw new Error('byte start mismatch');

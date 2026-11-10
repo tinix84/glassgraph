@@ -113,13 +113,18 @@ def judgment_set_hash(records: list[dict]) -> str:
     return _canonical_hash("glassgraph:benchmark-judgments:v1", payload)
 
 
-def benchmark_version(privacy: str, records: list[dict]) -> str:
+def benchmark_version(
+    privacy: str,
+    records: list[dict],
+    corpus_snapshot_hash: str,
+) -> str:
     """Return a content-addressed version for one frozen benchmark identity."""
     if privacy not in {"public", "private"}:
         raise ValueError("Benchmark privacy must be public or private")
     digest = _canonical_hash(
         "glassgraph:benchmark-version:v1",
         {
+            "corpus_snapshot_hash": corpus_snapshot_hash,
             "query_set_hash": query_set_hash(records),
             "judgment_set_hash": judgment_set_hash(records),
         },
@@ -149,7 +154,10 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
                 ).encode()
             ).hexdigest(),
         }
-        for path in sorted(root.rglob("*.md"))
+        for path in sorted(
+            root.rglob("*.md"),
+            key=lambda item: item.relative_to(root).as_posix(),
+        )
     ]
     return _canonical_hash("glassgraph:benchmark-corpus:v1", documents)
 
@@ -312,8 +320,6 @@ def _normalization_segments(content: str) -> list[tuple[str, str]]:
 def _original_utf8_byte_offset(
     original_text: str,
     normalized_offset: int,
-    *,
-    boundary: str,
 ) -> int:
     normalized_cursor = 0
     byte_cursor = 0
@@ -342,8 +348,8 @@ def _original_utf8_byte_offset(
                 if column == next_normalized:
                     return byte_cursor + next_original
                 if normalized_column < column < next_normalized:
-                    return byte_cursor + (
-                        original_byte_column if boundary == "start" else next_original
+                    raise ValueError(
+                        "Normalized evidence coordinate has no exact source interval"
                     )
                 normalized_column = next_normalized
                 original_byte_column = next_original
@@ -366,6 +372,8 @@ def derive_evidence_records(
     """Derive every ADR-0013 identity for an exact judged passage occurrence."""
     root = Path(corpus_root).resolve()
     canonical_path = _canonical_document_path(judgment["path"])
+    if PurePosixPath(canonical_path).suffix != ".md":
+        raise ValueError("Evidence judgment is outside the frozen Markdown corpus")
     source_path = (root / Path(*PurePosixPath(canonical_path).parts)).resolve()
     try:
         source_path.relative_to(root)
@@ -442,10 +450,10 @@ def derive_evidence_records(
                 "line_start": line_start,
                 "line_end": max(line_start, line_end),
                 "utf8_byte_start": _original_utf8_byte_offset(
-                    original_text, occurrence, boundary="start"
+                    original_text, occurrence
                 ),
                 "utf8_byte_end": _original_utf8_byte_offset(
-                    original_text, occurrence_end, boundary="end"
+                    original_text, occurrence_end
                 ),
             }
         )
@@ -457,7 +465,7 @@ def validate_evidence_judgments(records: list[dict], corpus_root: str | Path) ->
     """Reject benchmark judgments that are not valid ADR-0013 evidence identities."""
     for query in records:
         judgments = _passages(query.get("required_groups", []))
-        judgments.extend(query.get("irrelevant", []))
+        judgments.extend(query.get("irrelevant") or [])
         for judgment in judgments:
             derived = derive_evidence_records(corpus_root, judgment)
             matching = [
@@ -748,9 +756,14 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
         path_relevant_hits += sum(
             hit.get("path") in expected_paths for hit in raw_hits[:10]
         )
-        for _grade, matching_group in _ranked_group_matches(groups, raw_hits[:10]):
-            if matching_group is not None:
-                exact_evidence_hits += 1
+        exact_evidence_hits += sum(
+            any(
+                _matches(hit, passage)
+                for group in groups
+                for passage in group
+            )
+            for hit in raw_hits[:10]
+        )
 
     return {
         "positive_queries": len(recalls_at_5),
