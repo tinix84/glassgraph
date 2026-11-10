@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 from collections import Counter
@@ -133,14 +134,30 @@ def _qmd_index_sha256(value: str | None) -> str | None:
     return _file_sha256(cached)
 
 
+def _path_sha256(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    if path.is_dir():
+        return _directory_sha256(path)
+    return _file_sha256(path)
+
+
 def _backend_settings_payload(args) -> dict:
+    config_artifacts = getattr(args, "backend_config_artifact", []) or []
+    model_artifact = getattr(args, "retrieval_model_artifact", None)
     common = {
         "backend": args.backend,
         "limit": args.limit,
         "path_prefix": args.path_prefix,
         "tokenizer": str(args.tokenizer) if args.tokenizer else None,
+        "retrieval_model_id": getattr(args, "retrieval_model_id", None),
         "artifact_hashes": {
             "tokenizer": _file_sha256(args.tokenizer),
+            "retrieval_model": _path_sha256(model_artifact),
+            **{
+                f"backend_config_{index}": _path_sha256(path)
+                for index, path in enumerate(config_artifacts)
+            },
         },
     }
     if args.backend == "grooveseek":
@@ -161,6 +178,7 @@ def _backend_settings_payload(args) -> dict:
         "index": args.index,
         "collection": args.collection,
         "corpus_root": str(args.corpus_root) if args.corpus_root else None,
+        "qmd_embed_model": os.environ.get("QMD_EMBED_MODEL"),
         "artifact_hashes": {
             **common["artifact_hashes"],
             "node_executable": _executable_sha256(args.node_executable),
@@ -336,6 +354,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--benchmark-corpus-root", type=Path, required=True)
     parser.add_argument("--tokenizer", type=Path)
+    parser.add_argument("--retrieval-model-id")
+    parser.add_argument("--retrieval-model-artifact", type=Path)
+    parser.add_argument(
+        "--backend-config-artifact",
+        type=Path,
+        action="append",
+        default=[],
+    )
     parser.add_argument("--path-prefix")
     parser.add_argument("--settings-lock")
     parser.add_argument("--setup-time-ms", type=float, required=True)
@@ -350,10 +376,6 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    settings_identity = _backend_settings_payload(args)
-    actual_settings_lock = retrieval_benchmark.backend_settings_lock(
-        settings_identity
-    )
     measurements = (
         args.setup_time_ms,
         args.full_build_time_ms,
@@ -392,8 +414,25 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             parser.error("The private report path must differ from the workbook path")
         if args.output.exists():
             parser.error("The private report path already exists")
+        if not args.retrieval_model_id or args.retrieval_model_artifact is None:
+            parser.error(
+                "Private benchmarks require --retrieval-model-id and "
+                "--retrieval-model-artifact"
+            )
     if token_counter is None and args.tokenizer is None:
         parser.error("Production benchmark runs require --tokenizer")
+    try:
+        settings_identity = _backend_settings_payload(args)
+    except (OSError, UnicodeError):
+        parser.error("Benchmark artifacts could not be fingerprinted")
+    if args.privacy == "private" and any(
+        not fingerprint
+        for fingerprint in settings_identity["artifact_hashes"].values()
+    ):
+        parser.error("Private benchmark artifact fingerprints are incomplete")
+    actual_settings_lock = retrieval_benchmark.backend_settings_lock(
+        settings_identity
+    )
     if process_runner is None:
         process_runner = retrieval_backends.run_process
     if token_counter is None:

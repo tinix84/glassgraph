@@ -66,6 +66,9 @@ def test_backend_settings_identity_changes_when_artifact_bytes_change(
         index=str(index),
         collection="fixture",
         corpus_root=knowledge_base,
+        retrieval_model_id="fixture-model",
+        retrieval_model_artifact=tokenizer,
+        backend_config_artifact=[],
     )
 
     original = retrieval_benchmark_cli_mod._backend_settings_payload(args)
@@ -81,6 +84,81 @@ def test_backend_settings_identity_changes_when_artifact_bytes_change(
     assert retrieval_benchmark_mod.backend_settings_lock(
         original
     ) != retrieval_benchmark_mod.backend_settings_lock(changed)
+
+
+def test_qmd_settings_identity_binds_effective_embedding_model(
+    tmp_path,
+    monkeypatch,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    artifact = tmp_path / "artifact.bin"
+    artifact.write_text("artifact", encoding="utf-8")
+    args = SimpleNamespace(
+        backend="qmd",
+        limit=10,
+        path_prefix=None,
+        tokenizer=artifact,
+        groove_executable=None,
+        knowledge_base=None,
+        node_executable=str(artifact),
+        qmd_script=str(artifact),
+        index=str(artifact),
+        collection="fixture",
+        corpus_root=tmp_path,
+        retrieval_model_id="model-id",
+        retrieval_model_artifact=artifact,
+        backend_config_artifact=[],
+    )
+
+    monkeypatch.setenv("QMD_EMBED_MODEL", "model-a")
+    first = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+    monkeypatch.setenv("QMD_EMBED_MODEL", "model-b")
+    second = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+
+    assert retrieval_benchmark_mod.backend_settings_lock(
+        first
+    ) != retrieval_benchmark_mod.backend_settings_lock(second)
+
+
+def test_cli_redacts_artifact_fingerprint_failure(
+    tmp_path,
+    capsys,
+    monkeypatch,
+    retrieval_benchmark_cli_mod,
+):
+    secret_path = tmp_path / "private" / "model.bin"
+
+    def fail_fingerprint(_path):
+        raise PermissionError(str(secret_path))
+
+    monkeypatch.setattr(retrieval_benchmark_cli_mod, "_file_sha256", fail_fingerprint)
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(tmp_path / "unused.json"),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 0,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(secret_path) not in stderr
+    assert "Benchmark artifacts could not be fingerprinted" in stderr
 
 
 def _manifest(records, retrieval_benchmark_mod, split_membership, corpus_root):
@@ -378,6 +456,38 @@ def test_cli_requires_complete_backend_configuration(
     assert message in capsys.readouterr().err
 
 
+def test_private_cli_requires_retrieval_model_identity(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(tmp_path / "unused.json"),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "private",
+                "--split",
+                "development",
+                "--output",
+                str(tmp_path / "report.json"),
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 0,
+        )
+
+    assert error.value.code == 2
+    assert "require --retrieval-model-id" in capsys.readouterr().err
+
+
 def test_cli_rejects_empty_qmd_configuration_values(
     tmp_path, capsys, retrieval_benchmark_cli_mod
 ):
@@ -567,15 +677,34 @@ def test_cli_rejects_result_limit_below_reported_cutoffs(
 
 
 def _private_args(workbook_path, output_path, corpus_root):
+    artifact_root = corpus_root.parent / "private-benchmark-artifacts"
+    artifact_root.mkdir(exist_ok=True)
+    executable = artifact_root / "groove.exe"
+    tokenizer = artifact_root / "tokenizer.json"
+    model = artifact_root / "embedding-model.bin"
+    groove_index = corpus_root.parent / ".groove.db"
+    for path, content in (
+        (executable, "groove-test-binary"),
+        (tokenizer, "tokenizer-test-data"),
+        (model, "model-test-data"),
+        (groove_index, "index-test-data"),
+    ):
+        path.write_text(content, encoding="utf-8")
     return [
         "--queries",
         str(workbook_path),
         "--backend",
         "grooveseek",
         "--groove-executable",
-        "groove",
+        str(executable),
         "--knowledge-base",
-        "corpus",
+        str(corpus_root),
+        "--tokenizer",
+        str(tokenizer),
+        "--retrieval-model-id",
+        "fixture-embedding-model-v1",
+        "--retrieval-model-artifact",
+        str(model),
         "--path-prefix",
         "wiki",
         "--privacy",
@@ -752,27 +881,7 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
         }
 
     exit_code = retrieval_benchmark_cli_mod.main(
-        [
-            "--queries",
-            str(workbook_path),
-            "--backend",
-            "grooveseek",
-            "--groove-executable",
-            "groove",
-            "--knowledge-base",
-            "corpus",
-            "--path-prefix",
-            "wiki",
-            "--privacy",
-            "private",
-            "--split",
-            "development",
-            "--output",
-            str(output_path),
-            "--benchmark-corpus-root",
-            str(corpus_root),
-            *MEASUREMENT_ARGS,
-        ],
+        _private_args(workbook_path, output_path, corpus_root),
         process_runner=run_process,
         token_counter=lambda _text: 4,
     )
@@ -801,19 +910,13 @@ def test_private_evaluation_requires_manifest_settings_lock(
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
     payload = _private_payload(retrieval_benchmark_mod, corpus_root)
-    expected_lock = retrieval_benchmark_mod.backend_settings_lock({
-        "backend": "grooveseek",
-        "limit": 10,
-        "path_prefix": "wiki",
-        "tokenizer": None,
-        "executable": "groove",
-        "knowledge_base": "corpus",
-        "artifact_hashes": {
-            "tokenizer": None,
-            "executable": None,
-            "index": None,
-        },
-    })
+    workbook_path = tmp_path / "workbook.json"
+    output_path = tmp_path / "report.json"
+    args = _private_args(workbook_path, output_path, corpus_root)
+    parsed_args = retrieval_benchmark_cli_mod._parser().parse_args(args)
+    expected_lock = retrieval_benchmark_mod.backend_settings_lock(
+        retrieval_benchmark_cli_mod._backend_settings_payload(parsed_args)
+    )
     args_lock = []
     if invalid_case in {"mismatch", "changed-settings"}:
         payload["manifest"]["locked_backend_settings"] = {
@@ -828,10 +931,7 @@ def test_private_evaluation_requires_manifest_settings_lock(
     elif invalid_case == "malformed-lock-map":
         payload["manifest"]["locked_backend_settings"] = None
         args_lock = ["--settings-lock", expected_lock]
-    workbook_path = tmp_path / "workbook.json"
-    output_path = tmp_path / "report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")
-    args = _private_args(workbook_path, output_path, corpus_root)
     args[args.index("development")] = "evaluation"
     args.extend(args_lock)
     if invalid_case == "changed-settings":
@@ -853,26 +953,20 @@ def test_private_evaluation_records_matching_settings_lock(
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
     payload = _private_payload(retrieval_benchmark_mod, corpus_root)
-    settings_lock = retrieval_benchmark_mod.backend_settings_lock({
-        "backend": "grooveseek",
-        "limit": 10,
-        "path_prefix": "wiki",
-        "tokenizer": None,
-        "executable": "groove",
-        "knowledge_base": "corpus",
-        "artifact_hashes": {
-            "tokenizer": None,
-            "executable": None,
-            "index": None,
-        },
-    })
+    workbook_path = tmp_path / "workbook.json"
+    output_path = tmp_path / "report.json"
+    args = _private_args(workbook_path, output_path, corpus_root)
+    parsed_args = retrieval_benchmark_cli_mod._parser().parse_args(args)
+    settings_identity = retrieval_benchmark_cli_mod._backend_settings_payload(
+        parsed_args
+    )
+    settings_lock = retrieval_benchmark_mod.backend_settings_lock(
+        settings_identity
+    )
     payload["manifest"]["locked_backend_settings"] = {
         "grooveseek": settings_lock
     }
-    workbook_path = tmp_path / "workbook.json"
-    output_path = tmp_path / "report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")
-    args = _private_args(workbook_path, output_path, corpus_root)
     args[args.index("development")] = "evaluation"
     args.extend(["--settings-lock", settings_lock])
 
@@ -889,6 +983,10 @@ def test_private_evaluation_records_matching_settings_lock(
     report = json.loads(output_path.read_text(encoding="utf-8"))
     assert report["split"] == "evaluation"
     assert report["benchmark"]["settings_lock"] == settings_lock
+    assert report["benchmark"]["artifact_hashes"] == settings_identity[
+        "artifact_hashes"
+    ]
+    assert all(report["benchmark"]["artifact_hashes"].values())
 
 
 def test_public_cli_runs_qmd_adapter(
