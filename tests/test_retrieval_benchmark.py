@@ -390,6 +390,29 @@ def test_evaluate_rejects_unrelated_match_span_as_faithful_explanation(
     assert report["explanation_fidelity_rate_top_5"] == 0.0
 
 
+def test_evaluate_rejects_one_character_overlap_as_faithful_explanation(
+    retrieval_benchmark_mod,
+):
+    queries = [{"id": "n1", "query": "target", "required_groups": []}]
+    runs = {
+        "n1": {
+            "hits": [{
+                "path": "a.md",
+                "text": "unrelated",
+                "explanation": {
+                    "kind": "match_spans",
+                    "value": [{"start": 5, "end": 6}],
+                },
+            }]
+        }
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["explanation_trace_availability_rate_top_5"] == 1.0
+    assert report["explanation_fidelity_rate_top_5"] == 0.0
+
+
 def test_verify_evidence_hits_rejects_unjudged_duplicate_occurrence(
     tmp_path, retrieval_benchmark_mod
 ):
@@ -478,6 +501,29 @@ def test_benchmark_version_changes_with_judgment_correction(retrieval_benchmark_
     assert original_version.startswith("public-v1-")
     assert corrected_version.startswith("public-v1-")
     assert corrected_version != original_version
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"query": "Changed query"},
+        {"split": "evaluation"},
+    ],
+)
+def test_benchmark_version_changes_with_query_or_split_identity(
+    retrieval_benchmark_mod, change
+):
+    original = [{
+        "id": "q1",
+        "query": "Original query",
+        "split": "development",
+        "required_groups": [],
+    }]
+    changed = [{**original[0], **change}]
+
+    assert retrieval_benchmark_mod.benchmark_version(
+        "private", original
+    ) != retrieval_benchmark_mod.benchmark_version("private", changed)
 
 
 def test_backend_settings_lock_changes_with_retrieval_cutoff(retrieval_benchmark_mod):
@@ -640,6 +686,44 @@ def test_derive_evidence_ignores_frontmatter_and_fenced_code_headings(
 
     assert frontmatter[0]["heading_path"] == []
     assert body[0]["heading_path"] == ["Real Heading"]
+
+
+def test_derive_evidence_uses_shared_bom_safe_frontmatter_boundary(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_bytes(
+        "\ufeff---\n# YAML comment\ntitle: Example\n---\n\n# Real\nEvidence.\n".encode(
+            "utf-8"
+        )
+    )
+
+    frontmatter_record = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "title: Example"},
+    )
+    body_record = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert frontmatter_record[0]["heading_path"] == []
+    assert body_record[0]["heading_path"] == ["Real"]
+
+
+def test_derive_evidence_does_not_open_invalid_backtick_fence(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "```bad`\n# Real\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading_path"] == ["Real"]
 
 
 def test_derive_evidence_normalizes_empty_and_closed_atx_headings(

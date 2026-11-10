@@ -143,9 +143,15 @@ def validate_records(records: list[dict]) -> None:
     for record in records:
         groups = record.get("required_groups")
         irrelevant = record.get("irrelevant")
+        if not isinstance(groups, list) or (
+            irrelevant is not None and not isinstance(irrelevant, list)
+        ):
+            invalid_records += 1
+            continue
         relevant_ids = {
             judgment.get("evidence_id")
-            for group in groups or []
+            for group in groups
+            if isinstance(group, list)
             for judgment in group
             if isinstance(judgment, dict)
         }
@@ -401,8 +407,11 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         allow_nan=False,
     )
     if args.privacy == "private":
-        with args.output.open("x", encoding="utf-8", newline="\n") as output_file:
-            output_file.write(serialized + "\n")
+        try:
+            with args.output.open("x", encoding="utf-8", newline="\n") as output_file:
+                output_file.write(serialized + "\n")
+        except OSError:
+            parser.error("Private benchmark report could not be written")
     else:
         print(serialized)
     return 0

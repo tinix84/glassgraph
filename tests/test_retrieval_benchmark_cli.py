@@ -246,6 +246,15 @@ def test_validate_records_rejects_contradictory_evidence_grades(
         retrieval_benchmark_cli_mod.validate_records([record])
 
 
+def test_validate_records_rejects_malformed_judgment_container(
+    retrieval_benchmark_cli_mod,
+):
+    record = {"id": "q1", "query": "Question", "required_groups": 5}
+
+    with pytest.raises(ValueError, match="invalid"):
+        retrieval_benchmark_cli_mod.validate_records([record])
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
@@ -1184,6 +1193,37 @@ def test_cli_redacts_missing_private_workbook_path(
     assert error.value.code == 2
     assert str(workbook_path) not in stderr
     assert "Benchmark input could not be read" in stderr
+
+
+def test_cli_redacts_private_report_write_failure(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    workbook_path = tmp_path / "authoring-workbook.json"
+    output_path = tmp_path / "secret-missing-parent" / "private-report.json"
+    workbook_path.write_text(
+        json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: {
+                "stdout": json.dumps({"results": [], "low_confidence": False}),
+                "elapsed_ms": 1.0,
+                "peak_working_set_bytes": 1000,
+            },
+            token_counter=lambda _text: 0,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(output_path) not in stderr
+    assert "Private benchmark report could not be written" in stderr
 
 
 def test_private_cli_rejects_unexpected_distribution_bucket(

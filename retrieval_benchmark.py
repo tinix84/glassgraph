@@ -9,6 +9,8 @@ import statistics
 import unicodedata
 from pathlib import Path, PurePosixPath
 
+import frontmatter
+
 
 ATX_HEADING = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$")
 FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,}).*$")
@@ -55,10 +57,16 @@ def judgment_set_hash(records: list[dict]) -> str:
 
 
 def benchmark_version(privacy: str, records: list[dict]) -> str:
-    """Return a content-addressed benchmark version for one judgment set."""
+    """Return a content-addressed version for one frozen benchmark identity."""
     if privacy not in {"public", "private"}:
         raise ValueError("Benchmark privacy must be public or private")
-    digest = judgment_set_hash(records).removeprefix("sha256:")
+    digest = _canonical_hash(
+        "glassgraph:benchmark-version:v1",
+        {
+            "query_set_hash": query_set_hash(records),
+            "judgment_set_hash": judgment_set_hash(records),
+        },
+    ).removeprefix("sha256:")
     return f"{privacy}-v1-{digest[:12]}"
 
 
@@ -125,20 +133,20 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     stack = []
     sibling_counts = {}
     offset = 0
-    in_frontmatter = False
+    parsed_page = frontmatter.parse(text)
+    frontmatter_end = (
+        len(text) - len(parsed_page.body)
+        if parsed_page.fm_text is not None
+        else 0
+    )
     fence = None
     for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
         source_line = line.rstrip("\n")
-        stripped = source_line.strip()
-        if line_number == 1 and stripped == "---":
-            in_frontmatter = True
+        if offset < frontmatter_end:
             offset += len(line)
             continue
-        if in_frontmatter:
-            if stripped in {"---", "..."}:
-                in_frontmatter = False
-            offset += len(line)
-            continue
+        if line_number == 1:
+            source_line = source_line.removeprefix("\ufeff")
         if fence is not None:
             if re.match(rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*$", source_line):
                 fence = None
@@ -147,9 +155,11 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         fence_match = FENCE_OPEN.match(source_line)
         if fence_match:
             marker = fence_match.group(1)
-            fence = (marker[0], len(marker))
-            offset += len(line)
-            continue
+            info_string = source_line[fence_match.end(1) :]
+            if marker[0] != "`" or "`" not in info_string:
+                fence = (marker[0], len(marker))
+                offset += len(line)
+                continue
         match = ATX_HEADING.match(source_line)
         if match:
             level = len(match.group(1))
@@ -549,7 +559,26 @@ def _has_faithful_explanation(hit: dict, query_text: str) -> bool:
         except UnicodeDecodeError:
             return False
         normalized_match = unicodedata.normalize("NFC", matched_text).casefold().strip()
-        if not normalized_match or normalized_match not in normalized_query:
+        match_terms = re.findall(r"\w+", normalized_match)
+        query_terms = set(re.findall(r"\w+", normalized_query))
+        meaningful_term = any(
+            len(term) >= 2
+            or term.isdigit()
+            or (len(term) == 1 and matched_text.strip().isupper())
+            for term in match_terms
+        )
+        cjk_match = (
+            len(re.findall(r"[\u3400-\u9fff]", normalized_match)) >= 2
+            and normalized_match in normalized_query
+        )
+        if not (
+            cjk_match
+            or (
+                match_terms
+                and meaningful_term
+                and all(term in query_terms for term in match_terms)
+            )
+        ):
             return False
     return True
 
