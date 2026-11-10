@@ -551,3 +551,161 @@ def test_derive_evidence_returns_original_utf8_byte_span(
 
     assert records[0]["utf8_byte_start"] == source.index(passage)
     assert records[0]["utf8_byte_end"] == source.index(passage) + len(passage)
+
+
+def test_derive_evidence_byte_span_covers_reordered_combining_sequence(
+    tmp_path, retrieval_benchmark_mod
+):
+    combining_sequence = "a\u0315\u0300"
+    source = f"{combining_sequence}x\n".encode("utf-8")
+    (tmp_path / "answer.md").write_bytes(source)
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "à"},
+    )
+
+    assert records[0]["utf8_byte_start"] == 0
+    assert records[0]["utf8_byte_end"] == len(combining_sequence.encode("utf-8"))
+
+
+@pytest.mark.parametrize("unsafe_path", ["D:wiki/example.md", "./D:/wiki/example.md"])
+def test_derive_evidence_rejects_drive_relative_paths(
+    tmp_path, retrieval_benchmark_mod, unsafe_path
+):
+    with pytest.raises(ValueError, match="outside the corpus"):
+        retrieval_benchmark_mod.derive_evidence_records(
+            tmp_path,
+            {"path": unsafe_path, "text": "Evidence"},
+        )
+
+
+def test_derive_evidence_ignores_frontmatter_and_fenced_code_headings(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "---\n# YAML comment\ntitle: Example\n---\n\n"
+        "# Real Heading\n\n```sh\n# shell comment\n```\n\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    frontmatter = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "title: Example"},
+    )
+    body = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert frontmatter[0]["heading_path"] == []
+    assert body[0]["heading_path"] == ["Real Heading"]
+
+
+def test_verify_evidence_rejects_longer_line_with_judged_prefix(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# Ratings\n\nRated 12 V\n\nRated 12 V was rejected.\n",
+        encoding="utf-8",
+    )
+    judgment = {
+        "path": "answer.md",
+        "heading": "Ratings",
+        "text": "Rated 12 V",
+        "grade": "direct",
+    }
+    judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path, judgment
+    )[0]["evidence_id"]
+    queries = [{"id": "q1", "required_groups": [[judgment]]}]
+    runs = {"q1": {"hits": [{
+        "path": "answer.md",
+        "text": "Rated 12 V was rejected.",
+        "backend_locator": {"kind": "heuristic_line", "line": 5},
+    }]}}
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert runs["q1"]["hits"][0]["evidence_ids"] == []
+
+
+def test_verify_evidence_normalizes_decomposed_backend_text(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# Result\n\nCafé unit.\n", encoding="utf-8"
+    )
+    judgment = {
+        "path": "answer.md",
+        "heading": "Result",
+        "text": "Café unit.",
+        "grade": "direct",
+    }
+    judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path, judgment
+    )[0]["evidence_id"]
+    queries = [{"id": "q1", "required_groups": [[judgment]]}]
+    runs = {"q1": {"hits": [{
+        "path": "answer.md",
+        "text": "Cafe\u0301 unit.",
+    }]}}
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert runs["q1"]["hits"][0]["evidence_ids"] == [judgment["evidence_id"]]
+
+
+def test_verify_evidence_rejects_claimed_id_at_wrong_repeated_locator(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# First\n\nRepeated.\n\n# Second\n\nRepeated.\n", encoding="utf-8"
+    )
+    judgment = {
+        "path": "answer.md",
+        "heading": "First",
+        "text": "Repeated.",
+        "grade": "direct",
+    }
+    judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path, judgment
+    )[0]["evidence_id"]
+    queries = [{"id": "q1", "required_groups": [[judgment]]}]
+    runs = {"q1": {"hits": [{
+        "evidence_id": judgment["evidence_id"],
+        "path": "answer.md",
+        "text": "Repeated.",
+        "backend_locator": {"kind": "heuristic_line", "line": 7},
+    }]}}
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert runs["q1"]["hits"][0]["evidence_ids"] == []
+
+
+def test_verify_evidence_rejects_ambiguous_same_line_occurrences(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# Result\n\nRepeated. Repeated.\n", encoding="utf-8"
+    )
+    judgment = {
+        "path": "answer.md",
+        "heading": "Result",
+        "text": "Repeated.",
+        "grade": "direct",
+    }
+    judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path, judgment
+    )[0]["evidence_id"]
+    queries = [{"id": "q1", "required_groups": [[judgment]]}]
+    runs = {"q1": {"hits": [{
+        "path": "answer.md",
+        "text": "Repeated.",
+        "backend_locator": {"kind": "heuristic_line", "line": 3},
+    }]}}
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert runs["q1"]["hits"][0]["evidence_ids"] == []

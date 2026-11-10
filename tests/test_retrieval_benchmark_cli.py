@@ -221,6 +221,21 @@ def test_validate_records_requires_explicit_irrelevant_judgment_for_positive(
         retrieval_benchmark_cli_mod.validate_records([record])
 
 
+def test_validate_records_rejects_relevant_judgment_on_negative_query(
+    retrieval_benchmark_cli_mod,
+):
+    record = _public_queries()[-1]
+    record["irrelevant"] = [{
+        "evidence_id": PUBLIC_ANSWER_ID,
+        "path": "answer.md",
+        "text": "Exact answer passage.",
+        "grade": "direct",
+    }]
+
+    with pytest.raises(ValueError, match="invalid"):
+        retrieval_benchmark_cli_mod.validate_records([record])
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
@@ -1086,6 +1101,26 @@ def test_cli_redacts_private_evidence_validation_failures(
     assert secret_path not in stderr
     assert str(corpus_root) not in stderr
     assert "Benchmark evidence verification failed" in stderr
+
+
+def test_cli_redacts_missing_private_workbook_path(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    workbook_path = tmp_path / "secret-private-workbook.json"
+    output_path = tmp_path / "report.json"
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(workbook_path) not in stderr
+    assert "Benchmark input could not be read" in stderr
 
 
 def test_private_cli_rejects_unexpected_distribution_bucket(

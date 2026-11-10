@@ -10,7 +10,8 @@ import unicodedata
 from pathlib import Path, PurePosixPath
 
 
-ATX_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
+ATX_HEADING = re.compile(r"^[ ]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*$")
+FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,}).*$")
 
 
 def _canonical_hash(domain: str, payload) -> str:
@@ -96,7 +97,10 @@ def _canonical_document_path(value: str) -> str:
     parts = [part for part in path.parts if part not in {"", "."}]
     if not parts:
         raise ValueError("Evidence judgment path is empty")
-    return "/".join(parts)
+    canonical = "/".join(parts)
+    if re.match(r"^[A-Za-z]:", canonical):
+        raise ValueError("Evidence judgment path is outside the corpus")
+    return canonical
 
 
 def _heading_instances(text: str, document_id: str) -> list[dict]:
@@ -121,8 +125,32 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     stack = []
     sibling_counts = {}
     offset = 0
+    in_frontmatter = False
+    fence = None
     for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
-        match = ATX_HEADING.match(line.rstrip("\n"))
+        source_line = line.rstrip("\n")
+        stripped = source_line.strip()
+        if line_number == 1 and stripped == "---":
+            in_frontmatter = True
+            offset += len(line)
+            continue
+        if in_frontmatter:
+            if stripped in {"---", "..."}:
+                in_frontmatter = False
+            offset += len(line)
+            continue
+        if fence is not None:
+            if re.match(rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*$", source_line):
+                fence = None
+            offset += len(line)
+            continue
+        fence_match = FENCE_OPEN.match(source_line)
+        if fence_match:
+            marker = fence_match.group(1)
+            fence = (marker[0], len(marker))
+            offset += len(line)
+            continue
+        match = ATX_HEADING.match(source_line)
         if match:
             level = len(match.group(1))
             title = unicodedata.normalize("NFC", match.group(2))
@@ -159,7 +187,35 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     return headings
 
 
-def _original_utf8_byte_offset(original_text: str, normalized_offset: int) -> int:
+def _normalization_segments(content: str) -> list[tuple[str, str]]:
+    segments = []
+    current = ""
+    for character in content:
+        interacts = (
+            bool(current)
+            and (
+                unicodedata.combining(character) != 0
+                or unicodedata.normalize("NFC", current + character)
+                != unicodedata.normalize("NFC", current)
+                + unicodedata.normalize("NFC", character)
+            )
+        )
+        if current and not interacts:
+            segments.append((current, unicodedata.normalize("NFC", current)))
+            current = character
+        else:
+            current += character
+    if current:
+        segments.append((current, unicodedata.normalize("NFC", current)))
+    return segments
+
+
+def _original_utf8_byte_offset(
+    original_text: str,
+    normalized_offset: int,
+    *,
+    boundary: str,
+) -> int:
     normalized_cursor = 0
     byte_cursor = 0
     for original_line in original_text.splitlines(keepends=True):
@@ -173,14 +229,26 @@ def _original_utf8_byte_offset(original_text: str, normalized_offset: int) -> in
         content_end = normalized_cursor + len(normalized_content)
         if normalized_offset <= content_end:
             column = normalized_offset - normalized_cursor
-            candidates = [
-                len(content[:index].encode("utf-8"))
-                for index in range(len(content) + 1)
-                if len(unicodedata.normalize("NFC", content[:index])) == column
-            ]
-            if not candidates:
-                raise ValueError("Normalized evidence coordinate has no source byte boundary")
-            return byte_cursor + max(candidates)
+            if not content and column == 0:
+                return byte_cursor
+            normalized_column = 0
+            original_byte_column = 0
+            for original_segment, normalized_segment in _normalization_segments(content):
+                next_normalized = normalized_column + len(normalized_segment)
+                next_original = original_byte_column + len(
+                    original_segment.encode("utf-8")
+                )
+                if column == normalized_column:
+                    return byte_cursor + original_byte_column
+                if column == next_normalized:
+                    return byte_cursor + next_original
+                if normalized_column < column < next_normalized:
+                    return byte_cursor + (
+                        original_byte_column if boundary == "start" else next_original
+                    )
+                normalized_column = next_normalized
+                original_byte_column = next_original
+            raise ValueError("Normalized evidence coordinate has no source byte boundary")
         normalized_cursor = content_end
         if ending:
             normalized_cursor += 1
@@ -216,12 +284,9 @@ def derive_evidence_records(
     )
     if not passage:
         raise ValueError("Evidence judgment passage is empty")
-    if not passage.endswith("\n") and passage + "\n" in text:
-        passage += "\n"
 
     document_id = _canonical_hash("glassgraph:document:v1", {"path": canonical_path})
     headings = _heading_instances(text, document_id)
-    passage_hash = "sha256:" + hashlib.sha256(passage.encode("utf-8")).hexdigest()
     source_hash = "sha256:" + hashlib.sha256(source_bytes).hexdigest()
     records = []
     start = 0
@@ -230,19 +295,32 @@ def derive_evidence_records(
         occurrence = text.find(passage, start)
         if occurrence < 0:
             break
+        occurrence_passage = (
+            passage + "\n"
+            if not passage.endswith("\n")
+            and text.startswith(passage + "\n", occurrence)
+            else passage
+        )
+        passage_hash = "sha256:" + hashlib.sha256(
+            occurrence_passage.encode("utf-8")
+        ).hexdigest()
         heading = max(
             (item for item in headings if item["start"] <= occurrence),
             key=lambda item: item["start"],
         )
-        occurrence_end = occurrence + len(passage)
+        occurrence_end = occurrence + len(occurrence_passage)
         if occurrence_end > heading["end"]:
-            start = occurrence + max(1, len(passage))
+            start = occurrence + len(passage)
             continue
         ordinal_key = (heading["id"], passage_hash)
         passage_ordinal = ordinals.get(ordinal_key, 0)
         ordinals[ordinal_key] = passage_ordinal + 1
         line_start = text.count("\n", 0, occurrence) + 1
-        line_end = line_start + passage.count("\n") - int(passage.endswith("\n"))
+        line_end = (
+            line_start
+            + occurrence_passage.count("\n")
+            - int(occurrence_passage.endswith("\n"))
+        )
         records.append(
             {
                 "document_id": document_id,
@@ -257,6 +335,7 @@ def derive_evidence_records(
                     },
                 ),
                 "passage_hash": passage_hash,
+                "normalized_passage": occurrence_passage,
                 "source_hash": source_hash,
                 "path": canonical_path,
                 "heading": heading["title"],
@@ -264,14 +343,14 @@ def derive_evidence_records(
                 "line_start": line_start,
                 "line_end": max(line_start, line_end),
                 "utf8_byte_start": _original_utf8_byte_offset(
-                    original_text, occurrence
+                    original_text, occurrence, boundary="start"
                 ),
                 "utf8_byte_end": _original_utf8_byte_offset(
-                    original_text, occurrence_end
+                    original_text, occurrence_end, boundary="end"
                 ),
             }
         )
-        start = occurrence + max(1, len(passage))
+        start = occurrence + len(passage)
     return records
 
 
@@ -319,31 +398,51 @@ def verify_evidence_hits(
                 if id(hit) in seen_hits:
                     continue
                 seen_hits.add(id(hit))
-                claimed_ids = set(hit.get("evidence_ids", []))
-                if hit.get("evidence_id"):
-                    claimed_ids.add(hit["evidence_id"])
                 verified_ids = set()
                 for passage, occurrences, selected in judgments:
                     if (
                         hit.get("path") != selected["path"]
-                        or str(passage["text"]) not in str(hit.get("text") or "")
+                        or not _normalized_hit_contains_passage(
+                            str(hit.get("text") or ""),
+                            selected["normalized_passage"],
+                        )
                     ):
-                        continue
-                    if selected["evidence_id"] in claimed_ids:
-                        verified_ids.add(selected["evidence_id"])
-                        continue
-                    if len(occurrences) == 1:
-                        verified_ids.add(selected["evidence_id"])
                         continue
                     locator = hit.get("backend_locator") or {}
                     line = locator.get("line")
-                    if (
-                        locator.get("kind") == "heuristic_line"
-                        and isinstance(line, int)
-                        and selected["line_start"] <= line <= selected["line_end"]
-                    ):
+                    if locator.get("kind") == "heuristic_line":
+                        matching_occurrences = [
+                            record
+                            for record in occurrences
+                            if isinstance(line, int)
+                            and record["line_start"] <= line <= record["line_end"]
+                        ]
+                        if matching_occurrences == [selected]:
+                            verified_ids.add(selected["evidence_id"])
+                    elif len(occurrences) == 1:
                         verified_ids.add(selected["evidence_id"])
                 hit["evidence_ids"] = sorted(verified_ids)
+
+
+def _normalized_hit_contains_passage(hit_text: str, passage: str) -> bool:
+    normalized_hit = unicodedata.normalize(
+        "NFC",
+        hit_text.replace("\r\n", "\n").replace("\r", "\n"),
+    )
+    if passage in normalized_hit:
+        return True
+    if not passage.endswith("\n"):
+        return False
+    line_without_ending = passage[:-1]
+    start = 0
+    while True:
+        occurrence = normalized_hit.find(line_without_ending, start)
+        if occurrence < 0:
+            return False
+        end = occurrence + len(line_without_ending)
+        if end == len(normalized_hit) or normalized_hit[end] == "\n":
+            return True
+        start = occurrence + max(1, len(line_without_ending))
 
 
 def _passages(groups: list[list[dict]]) -> list[dict]:

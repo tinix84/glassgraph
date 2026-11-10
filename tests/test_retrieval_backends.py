@@ -83,7 +83,10 @@ def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends
     assert run["hits"][0]["path"] == ".notes.md"
 
 
-@pytest.mark.parametrize("unsafe_path", ["../answer.md", "/answer.md", "C:/answer.md"])
+@pytest.mark.parametrize(
+    "unsafe_path",
+    ["../answer.md", "/answer.md", "C:/answer.md", "./C:/answer.md", "C:answer.md"],
+)
 def test_grooveseek_adapter_rejects_nonrelative_result_paths(
     retrieval_backends_mod, unsafe_path
 ):

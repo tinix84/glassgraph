@@ -148,7 +148,13 @@ def validate_records(records: list[dict]) -> None:
             and bool(record["query"].strip())
             and isinstance(groups, list)
             and (
-                not groups
+                (
+                    not groups
+                    and (
+                        irrelevant in (None, [])
+                        or _valid_irrelevant_judgments(irrelevant)
+                    )
+                )
                 or (
                     _valid_required_groups(groups)
                     and _valid_irrelevant_judgments(irrelevant)
@@ -265,7 +271,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         process_runner = retrieval_backends.run_process
     if token_counter is None:
         token_counter = load_token_counter(args.tokenizer)
-    payload = json.loads(args.queries.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(args.queries.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        parser.error("Benchmark input could not be read")
     try:
         records = (
             payload.get("records", [])

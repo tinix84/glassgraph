@@ -19,6 +19,8 @@ def _with_prefix(path: str, prefix: str | None) -> str:
     if not parts or ".." in parts:
         raise RuntimeError("Backend returned an unsafe result path")
     relative = "/".join(parts)
+    if re.match(r"^[A-Za-z]:", relative):
+        raise RuntimeError("Backend returned an unsafe result path")
     if prefix is None:
         return relative
     safe_prefix = _with_prefix(prefix, None)
