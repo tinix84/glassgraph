@@ -139,3 +139,32 @@ def test_run_process_does_not_expose_backend_stderr(retrieval_backends_mod):
 
     assert str(error.value) == "backend command failed with exit code 7"
     assert private_text not in str(error.value)
+
+
+def test_qmd_adapter_redacts_result_paths_outside_corpus(
+    tmp_path, retrieval_backends_mod
+):
+    private_path = tmp_path.parent / "private" / "secret.md"
+
+    def run_process(_args, _environment):
+        return {
+            "stdout": json.dumps([{"file": str(private_path), "snippet": "secret"}]),
+            "elapsed_ms": 1.0,
+            "peak_working_set_bytes": 1,
+        }
+
+    adapter = retrieval_backends_mod.QmdAdapter(
+        node_executable="node",
+        qmd_script="qmd",
+        index="index",
+        collection="collection",
+        corpus_root=tmp_path,
+        process_runner=run_process,
+        token_counter=lambda _text: 1,
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        adapter.query("private query", limit=5)
+
+    assert str(error.value) == "QMD returned a result outside the benchmark corpus"
+    assert str(private_path) not in str(error.value)

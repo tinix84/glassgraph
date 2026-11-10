@@ -97,8 +97,8 @@
 
       const verifiedEvidence = {
         path:'wiki/example.md',
-        passage:'Efficiency is 98%.',
-        locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:73 } },
+        passage:'Efficiency is 98%.\n',
+        locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:74 } },
         passage_hash:'sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf',
         source_document_hash:'sha256:28785419904a3300d4e0aec3f30c367b57ed1418705e8deb360806c908cb1c08'
       };
@@ -151,7 +151,7 @@
         return {
           result_id:'result:1', kind:'passage_candidate', rank:1,
           score:{ normalized:null, backend:{ adapter:capabilities[backend].adapter, kind:trace.score_kind, raw:trace.raw_score } },
-          backend_trace:{ locator_kind:trace.locator_kind, path:'wiki/example.md', heading:'Results', passage:'Efficiency is 98%.', raw_preserved:true },
+          backend_trace:{ locator_kind:trace.locator_kind, path:'wiki/example.md', heading_path:['Results'], line:8, passage:'Efficiency is 98%.\n', source_document_hash:verifiedEvidence.source_document_hash, raw_preserved:true },
           evidence:{ status:indexState === 'stale' ? 'stale' : 'unverified', evidence_id:null, locator:null, verification_error:indexState === 'stale' ? 'source_hash_mismatch' : null }
         };
       }
@@ -171,7 +171,7 @@
           { stage:'backend_candidate', detail:'Raw adapter score and locator preserved.' },
           { stage:'compiler_verification', detail:indexState === 'fresh' ? 'Exact passage and source hash checked against the evidence table.' : 'Verification refused because the index is stale.' },
           { stage:'contract_result', detail:'Evidence ID emitted only after verification.' }
-        ], evidence_ids:indexState === 'fresh' ? [IDS.evidence] : [], score:null };
+        ], evidence_ids:[], score:null };
       }
 
       function execute(backend, indexState, operation) {
@@ -204,7 +204,13 @@
           next.status = 'stale';
           return next;
         }
-        if (hit.backend_trace?.path !== verifiedEvidence.path || hit.backend_trace?.passage !== verifiedEvidence.passage) {
+        const trace = hit.backend_trace;
+        const locatorMatches = trace?.path === verifiedEvidence.path
+          && JSON.stringify(trace.heading_path) === JSON.stringify(verifiedEvidence.locator.heading_path)
+          && trace.line === verifiedEvidence.locator.lines.start
+          && trace.passage === verifiedEvidence.passage
+          && trace.source_document_hash === verifiedEvidence.source_document_hash;
+        if (!locatorMatches) {
           hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'candidate_mismatch' };
           next.status = 'rejected';
           return next;

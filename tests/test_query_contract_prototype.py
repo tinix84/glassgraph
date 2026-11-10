@@ -22,7 +22,7 @@ def test_query_contract_verifies_exact_fixture_evidence_only():
         pytest.skip("Node.js is not installed")
 
     source_bytes = EXAMPLE.read_bytes()
-    passage = b"Efficiency is 98%."
+    passage = b"Efficiency is 98%.\n"
     byte_start = source_bytes.index(passage)
     line_start = source_bytes[:byte_start].count(b"\n") + 1
     expected = {
@@ -52,8 +52,17 @@ wrong.results[0].backend_trace.passage = 'Unrelated text.';
 const rejected = QueryContract.verify(wrong);
 if (rejected.results[0].evidence.evidence_id !== null) throw new Error('wrong passage was certified');
 
+const wrongLocator = QueryContract.execute('groove', 'fresh', 'search');
+wrongLocator.results[0].backend_trace.heading_path = ['Other'];
+wrongLocator.results[0].backend_trace.line = 12;
+wrongLocator.results[0].backend_trace.source_document_hash = 'sha256:' + '0'.repeat(64);
+const locatorRejected = QueryContract.verify(wrongLocator);
+if (locatorRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong locator was certified');
+
 const staleExplain = QueryContract.execute('groove', 'stale', 'explain');
 if (staleExplain.results.some(result => (result.evidence_ids || []).length)) throw new Error('stale explain exposed evidence ID');
+const freshExplain = QueryContract.execute('groove', 'fresh', 'explain');
+if (freshExplain.results.some(result => (result.evidence_ids || []).length)) throw new Error('unverified explain exposed evidence ID');
 
 const typedPath = QueryContract.execute('groove', 'fresh', 'path');
 const edge = typedPath.results[0].steps.find(step => step.kind === 'edge').edge;

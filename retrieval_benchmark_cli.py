@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from collections import Counter
 from datetime import date
@@ -38,6 +39,8 @@ def validate_private_workbook(payload: dict) -> None:
         (record.get("split"), record.get("kind"))
         for record in payload.get("records", [])
     )
+    if len(payload.get("records", [])) != 60 or set(counts) != set(expected):
+        raise ValueError("Private benchmark distribution contains unexpected records")
     missing = [
         f"{split} {kind} {counts[(split, kind)]}/{count}"
         for (split, kind), count in expected.items()
@@ -46,11 +49,6 @@ def validate_private_workbook(payload: dict) -> None:
     if missing:
         raise ValueError("Private benchmark distribution is incomplete: " + ", ".join(missing))
     records = payload.get("records", [])
-    record_ids = [record.get("id") for record in records]
-    if any(not isinstance(record_id, str) or not record_id for record_id in record_ids):
-        raise ValueError("Every private benchmark record needs a nonempty ID")
-    if len(set(record_ids)) != len(record_ids):
-        raise ValueError("Private benchmark record IDs must be unique")
     unapproved_count = sum(
         record.get("owner_authored") is not True
         or record.get("owner_adjudicated") is not True
@@ -120,14 +118,28 @@ def validate_records(records: list[dict]) -> None:
         )
 
 
-def validate_manifest(payload: dict, records: list[dict], privacy: str) -> None:
+def validate_manifest(
+    payload: dict,
+    records: list[dict],
+    privacy: str,
+    corpus_root: Path,
+) -> None:
     manifest = payload.get("manifest")
     if not isinstance(manifest, dict):
         raise ValueError("The benchmark manifest is missing")
+    expected_version = "private-v1" if privacy == "private" else "public-v1"
+    if payload.get("benchmark_version") != expected_version:
+        raise ValueError("The benchmark version is invalid")
     if manifest.get("schema_version") != payload.get("schema_version"):
         raise ValueError("The benchmark manifest schema version does not match")
     if not SHA256_PATTERN.fullmatch(str(manifest.get("corpus_snapshot_hash") or "")):
         raise ValueError("The benchmark corpus snapshot hash is invalid")
+    try:
+        current_corpus_hash = retrieval_benchmark.corpus_snapshot_hash(corpus_root)
+    except (OSError, UnicodeError) as error:
+        raise ValueError("The benchmark corpus cannot be verified") from error
+    if manifest["corpus_snapshot_hash"] != current_corpus_hash:
+        raise ValueError("The benchmark corpus snapshot hash does not match")
     if manifest.get("query_set_hash") != retrieval_benchmark.query_set_hash(records):
         raise ValueError("The benchmark query-set hash does not match")
     if manifest.get("judgment_set_hash") != retrieval_benchmark.judgment_set_hash(records):
@@ -164,6 +176,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--index")
     parser.add_argument("--collection")
     parser.add_argument("--corpus-root", type=Path)
+    parser.add_argument("--benchmark-corpus-root", type=Path, required=True)
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--path-prefix")
     parser.add_argument("--setup-time-ms", type=float, required=True)
@@ -184,7 +197,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         args.no_change_update_ms,
         args.one_file_update_ms,
     )
-    if any(value < 0 for value in measurements) or args.derived_index_size_bytes <= 0:
+    if (
+        any(not math.isfinite(value) or value < 0 for value in measurements)
+        or args.derived_index_size_bytes <= 0
+    ):
         parser.error("Benchmark measurements must be nonnegative and index size must be positive")
     if args.limit <= 0:
         parser.error("The result limit must be positive")
@@ -203,13 +219,20 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         token_counter = load_token_counter(args.tokenizer)
     payload = json.loads(args.queries.read_text(encoding="utf-8"))
     try:
+        records = (
+            payload.get("records", [])
+            if args.privacy == "private"
+            else payload.get("queries", [])
+        )
+        validate_records(records)
         if args.privacy == "private":
             validate_private_workbook(payload)
-            records = payload.get("records", [])
-        else:
-            records = payload.get("queries", [])
-        validate_records(records)
-        validate_manifest(payload, records, args.privacy)
+        validate_manifest(
+            payload,
+            records,
+            args.privacy,
+            args.benchmark_corpus_root,
+        )
     except ValueError as error:
         parser.error(str(error))
     if args.privacy == "private":
@@ -249,6 +272,14 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         query["id"]: adapter.query(query["query"], limit=args.limit)
         for query in queries
     }
+    try:
+        retrieval_benchmark.verify_evidence_hits(
+            queries,
+            runs,
+            args.benchmark_corpus_root,
+        )
+    except (OSError, UnicodeError, ValueError):
+        parser.error("Evidence verification failed for the benchmark corpus")
     summary = retrieval_benchmark.evaluate(queries, runs)
     report = {
         "schema_version": 1,
@@ -256,7 +287,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         "privacy": args.privacy,
         "split": args.split,
         "query_count": len(queries),
-        "manifest": payload["manifest"],
+        "benchmark": {
+            "version": payload["benchmark_version"],
+            "corpus_verified": True,
+        },
         "measurements": {
             "setup_time_ms": args.setup_time_ms,
             "full_build_time_ms": args.full_build_time_ms,
@@ -267,7 +301,12 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         },
         "summary": summary,
     }
-    serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+    serialized = json.dumps(
+        report,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+    )
     if args.privacy == "private":
         with args.output.open("x", encoding="utf-8", newline="\n") as output_file:
             output_file.write(serialized + "\n")

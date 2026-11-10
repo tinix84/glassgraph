@@ -47,6 +47,7 @@ python retrieval_benchmark_cli.py `
   --backend grooveseek `
   --groove-executable <groove-command> `
   --knowledge-base <fixture-index> `
+  --benchmark-corpus-root tests/fixtures/benchmark/v1/corpus `
   --tokenizer <pinned-tokenizer.json> `
   --privacy public `
   --setup-time-ms <milliseconds> `
@@ -65,6 +66,7 @@ python retrieval_benchmark_cli.py `
   --backend grooveseek `
   --groove-executable <groove-command> `
   --knowledge-base <private-index> `
+  --benchmark-corpus-root <frozen-private-corpus-copy> `
   --tokenizer <pinned-tokenizer.json> `
   --path-prefix wiki `
   --privacy private `
@@ -78,7 +80,7 @@ python retrieval_benchmark_cli.py `
   --offline-verified
 ```
 
-The query file contains the frozen manifest and evidence IDs. The command rejects a stale query-set hash, judgment-set hash, or split map.
+The query file contains the frozen manifest and evidence IDs. The command verifies the corpus bytes and rejects stale manifest hashes or split maps.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 

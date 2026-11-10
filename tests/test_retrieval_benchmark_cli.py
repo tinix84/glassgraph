@@ -29,10 +29,10 @@ def _evidence_id(seed):
     return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
 
 
-def _manifest(records, retrieval_benchmark_mod, split_membership):
+def _manifest(records, retrieval_benchmark_mod, split_membership, corpus_root):
     return {
         "schema_version": 1,
-        "corpus_snapshot_hash": "sha256:" + "a" * 64,
+        "corpus_snapshot_hash": retrieval_benchmark_mod.corpus_snapshot_hash(corpus_root),
         "query_set_hash": retrieval_benchmark_mod.query_set_hash(records),
         "judgment_set_hash": retrieval_benchmark_mod.judgment_set_hash(records),
         "split_membership": split_membership,
@@ -111,7 +111,7 @@ def _private_records():
     return records
 
 
-def _private_payload(retrieval_benchmark_mod):
+def _private_payload(retrieval_benchmark_mod, corpus_root):
     records = _private_records()
     return _add_manifest(
         {"schema_version": 1, "benchmark_version": "private-v1", "records": records},
@@ -121,19 +121,27 @@ def _private_payload(retrieval_benchmark_mod):
             split: [record["id"] for record in records if record["split"] == split]
             for split in ("development", "evaluation")
         },
+        corpus_root,
     )
 
 
-def _add_manifest(payload, records, retrieval_benchmark_mod, split_membership):
+def _add_manifest(
+    payload,
+    records,
+    retrieval_benchmark_mod,
+    split_membership,
+    corpus_root,
+):
     payload["manifest"] = _manifest(
         records,
         retrieval_benchmark_mod,
         split_membership,
+        corpus_root,
     )
     return payload
 
 
-def _private_args(workbook_path, output_path):
+def _private_args(workbook_path, output_path, corpus_root):
     return [
         "--queries",
         str(workbook_path),
@@ -151,14 +159,25 @@ def _private_args(workbook_path, output_path):
         "development",
         "--output",
         str(output_path),
+        "--benchmark-corpus-root",
+        str(corpus_root),
         *MEASUREMENT_ARGS,
     ]
+
+
+def _write_corpus(tmp_path, *, private=False):
+    corpus_root = tmp_path / "corpus"
+    document = corpus_root / "wiki" / "answer.md" if private else corpus_root / "answer.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("Exact answer passage. Exact answer.\n", encoding="utf-8")
+    return corpus_root
 
 
 def test_public_cli_prints_aggregate_only(
     tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
     queries = _public_queries()
+    corpus_root = _write_corpus(tmp_path)
     queries_path = tmp_path / "queries.json"
     queries_path.write_text(
         json.dumps(
@@ -166,7 +185,7 @@ def test_public_cli_prints_aggregate_only(
                 "schema_version": 1,
                 "benchmark_version": "public-v1",
                 "queries": queries,
-            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]})
+            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]}, corpus_root)
         ),
         encoding="utf-8",
     )
@@ -202,6 +221,8 @@ def test_public_cli_prints_aggregate_only(
             "corpus",
             "--privacy",
             "public",
+            "--benchmark-corpus-root",
+            str(corpus_root),
             *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
@@ -226,7 +247,8 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
 ):
     workbook_path = tmp_path / "authoring-workbook.json"
     output_path = tmp_path / "private-report.json"
-    payload = _private_payload(retrieval_benchmark_mod)
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
     workbook_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -269,6 +291,8 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
             "development",
             "--output",
             str(output_path),
+            "--benchmark-corpus-root",
+            str(corpus_root),
             *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
@@ -291,14 +315,15 @@ def test_public_cli_runs_qmd_adapter(
 ):
     queries = _public_queries()
     queries_path = tmp_path / "queries.json"
-    document = tmp_path / "answer.md"
+    corpus_root = _write_corpus(tmp_path)
+    document = corpus_root / "answer.md"
     queries_path.write_text(
         json.dumps(
             _add_manifest({
                 "schema_version": 1,
                 "benchmark_version": "public-v1",
                 "queries": queries,
-            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]})
+            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]}, corpus_root)
         ),
         encoding="utf-8",
     )
@@ -335,9 +360,11 @@ def test_public_cli_runs_qmd_adapter(
             "--collection",
             "glassgraph-m1-public",
             "--corpus-root",
-            str(tmp_path),
+            str(corpus_root),
             "--privacy",
             "public",
+            "--benchmark-corpus-root",
+            str(corpus_root),
             *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
@@ -371,6 +398,7 @@ def test_load_token_counter_uses_pinned_tokenizer_file(
 def test_private_cli_rejects_incomplete_owner_benchmark(
     tmp_path, retrieval_benchmark_cli_mod
 ):
+    corpus_root = _write_corpus(tmp_path, private=True)
     workbook_path = tmp_path / "incomplete.json"
     output_path = tmp_path / "report.json"
     workbook_path.write_text(
@@ -404,6 +432,8 @@ def test_private_cli_rejects_incomplete_owner_benchmark(
                 "development",
                 "--output",
                 str(output_path),
+                "--benchmark-corpus-root",
+                str(corpus_root),
                 *MEASUREMENT_ARGS,
             ],
             process_runner=must_not_run,
@@ -417,13 +447,15 @@ def test_private_cli_rejects_incomplete_owner_benchmark(
 def test_private_cli_rejects_unadjudicated_record(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
-    payload = _private_payload(retrieval_benchmark_mod)
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
     payload["records"][0]["owner_adjudicated"] = False
     records = payload["records"]
     payload["manifest"] = _manifest(
         records,
         retrieval_benchmark_mod,
         payload["manifest"]["split_membership"],
+        corpus_root,
     )
     workbook_path = tmp_path / "unadjudicated.json"
     output_path = tmp_path / "report.json"
@@ -452,6 +484,8 @@ def test_private_cli_rejects_unadjudicated_record(
                 "development",
                 "--output",
                 str(output_path),
+                "--benchmark-corpus-root",
+                str(corpus_root),
                 *MEASUREMENT_ARGS,
             ],
             process_runner=must_not_run,
@@ -472,7 +506,8 @@ def test_private_cli_rejects_invalid_record_identity_or_judgment(
     retrieval_benchmark_mod,
     invalid_case,
 ):
-    payload = _private_payload(retrieval_benchmark_mod)
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
     if invalid_case == "duplicate-id":
         payload["records"][1]["id"] = payload["records"][0]["id"]
     elif invalid_case == "empty-positive":
@@ -487,6 +522,7 @@ def test_private_cli_rejects_invalid_record_identity_or_judgment(
             split: [record["id"] for record in records if record["split"] == split]
             for split in ("development", "evaluation")
         },
+        corpus_root,
     )
     workbook_path = tmp_path / f"{invalid_case}.json"
     output_path = tmp_path / "report.json"
@@ -494,7 +530,7 @@ def test_private_cli_rejects_invalid_record_identity_or_judgment(
 
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
-            _private_args(workbook_path, output_path),
+            _private_args(workbook_path, output_path, corpus_root),
             process_runner=lambda *_args: pytest.fail("backend must not run"),
             token_counter=lambda _text: 1,
         )
@@ -508,13 +544,14 @@ def test_private_cli_rejects_output_collision_before_backend_execution(
     retrieval_benchmark_cli_mod,
     retrieval_benchmark_mod,
 ):
+    corpus_root = _write_corpus(tmp_path, private=True)
     workbook_path = tmp_path / "workbook.json"
-    original = json.dumps(_private_payload(retrieval_benchmark_mod))
+    original = json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root))
     workbook_path.write_text(original, encoding="utf-8")
 
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
-            _private_args(workbook_path, workbook_path),
+            _private_args(workbook_path, workbook_path, corpus_root),
             process_runner=lambda *_args: pytest.fail("backend must not run"),
             token_counter=lambda _text: 1,
         )
@@ -528,17 +565,18 @@ def test_private_cli_refuses_to_replace_existing_report(
     retrieval_benchmark_cli_mod,
     retrieval_benchmark_mod,
 ):
+    corpus_root = _write_corpus(tmp_path, private=True)
     workbook_path = tmp_path / "workbook.json"
     output_path = tmp_path / "report.json"
     workbook_path.write_text(
-        json.dumps(_private_payload(retrieval_benchmark_mod)),
+        json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
         encoding="utf-8",
     )
     output_path.write_text("keep me", encoding="utf-8")
 
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
-            _private_args(workbook_path, output_path),
+            _private_args(workbook_path, output_path, corpus_root),
             process_runner=lambda *_args: pytest.fail("backend must not run"),
             token_counter=lambda _text: 1,
         )
@@ -552,6 +590,7 @@ def test_public_cli_rejects_categories_with_fewer_than_five_queries(
     retrieval_benchmark_cli_mod,
     retrieval_benchmark_mod,
 ):
+    corpus_root = _write_corpus(tmp_path)
     queries = _public_queries()
     queries.pop(0)
     payload = _add_manifest(
@@ -559,6 +598,7 @@ def test_public_cli_rejects_categories_with_fewer_than_five_queries(
         queries,
         retrieval_benchmark_mod,
         {"public": [query["id"] for query in queries]},
+        corpus_root,
     )
     queries_path = tmp_path / "small.json"
     queries_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -576,6 +616,8 @@ def test_public_cli_rejects_categories_with_fewer_than_five_queries(
                 "corpus",
                 "--privacy",
                 "public",
+                "--benchmark-corpus-root",
+                str(corpus_root),
                 *MEASUREMENT_ARGS,
             ],
             process_runner=lambda *_args: pytest.fail("backend must not run"),
@@ -590,12 +632,14 @@ def test_cli_rejects_manifest_hash_mismatch_before_backend_execution(
     retrieval_benchmark_cli_mod,
     retrieval_benchmark_mod,
 ):
+    corpus_root = _write_corpus(tmp_path)
     queries = _public_queries()
     payload = _add_manifest(
         {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
         queries,
         retrieval_benchmark_mod,
         {"public": [query["id"] for query in queries]},
+        corpus_root,
     )
     payload["queries"][0]["query"] = "Changed without a new manifest"
     queries_path = tmp_path / "changed.json"
@@ -614,8 +658,195 @@ def test_cli_rejects_manifest_hash_mismatch_before_backend_execution(
                 "corpus",
                 "--privacy",
                 "public",
+                "--benchmark-corpus-root",
+                str(corpus_root),
                 *MEASUREMENT_ARGS,
             ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+def test_public_report_does_not_copy_manifest_details(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        corpus_root,
+    )
+    payload["manifest"]["unexpected_private_field"] = "PRIVATE QUERY TEXT"
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    retrieval_benchmark_cli_mod.main(
+        [
+            "--queries",
+            str(queries_path),
+            "--backend",
+            "grooveseek",
+            "--groove-executable",
+            "groove",
+            "--knowledge-base",
+            "corpus",
+            "--privacy",
+            "public",
+            "--benchmark-corpus-root",
+            str(corpus_root),
+            *MEASUREMENT_ARGS,
+        ],
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({"results": [], "low_confidence": False}),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert "PRIVATE QUERY TEXT" not in output
+    assert "p1" not in output
+    assert "split_membership" not in report["benchmark"]
+
+
+def test_cli_rejects_corpus_snapshot_mismatch_before_backend_execution(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    frozen_root = _write_corpus(tmp_path)
+    different_root = tmp_path / "different-corpus"
+    different_root.mkdir()
+    (different_root / "answer.md").write_text("Different bytes.\n", encoding="utf-8")
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        frozen_root,
+    )
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(queries_path),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(different_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+def test_private_cli_rejects_unexpected_distribution_bucket(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
+    payload["records"].append(
+        {
+            "id": "private-v1-extra",
+            "split": "evaluation",
+            "kind": "unexpected",
+            "type": "negative",
+            "query": "Extra query",
+            "required_groups": [],
+            "adjudication_note": "Checked",
+            "owner_authored": True,
+            "owner_adjudicated": True,
+            "adjudicated_by": "Riccardo Tinivella",
+            "adjudicated_date": "2026-11-10",
+        }
+    )
+    records = payload["records"]
+    payload["manifest"] = _manifest(
+        records,
+        retrieval_benchmark_mod,
+        {
+            split: [record["id"] for record in records if record["split"] == split]
+            for split in ("development", "evaluation")
+        },
+        corpus_root,
+    )
+    workbook_path = tmp_path / "extra.json"
+    output_path = tmp_path / "report.json"
+    workbook_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("invalid_value", ["nan", "inf"])
+def test_cli_rejects_nonfinite_measurements(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    invalid_value,
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        corpus_root,
+    )
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+    args = [
+        "--queries",
+        str(queries_path),
+        "--backend",
+        "grooveseek",
+        "--groove-executable",
+        "groove",
+        "--knowledge-base",
+        "corpus",
+        "--privacy",
+        "public",
+        "--benchmark-corpus-root",
+        str(corpus_root),
+        *MEASUREMENT_ARGS,
+    ]
+    args[args.index("--full-build-time-ms") + 1] = invalid_value
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            args,
             process_runner=lambda *_args: pytest.fail("backend must not run"),
             token_counter=lambda _text: 1,
         )

@@ -54,11 +54,61 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
     documents = [
         {
             "path": path.relative_to(root).as_posix(),
-            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+            "sha256": "sha256:"
+            + hashlib.sha256(
+                unicodedata.normalize(
+                    "NFC",
+                    path.read_bytes()
+                    .decode("utf-8")
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n"),
+                ).encode()
+            ).hexdigest(),
         }
         for path in sorted(root.rglob("*.md"))
     ]
     return _canonical_hash("glassgraph:benchmark-corpus:v1", documents)
+
+
+def verify_evidence_hits(
+    queries: list[dict],
+    runs: dict[str, dict],
+    corpus_root: str | Path,
+) -> None:
+    """Attach evidence IDs only for unique exact passages in frozen source bytes."""
+    root = Path(corpus_root).resolve()
+    document_cache = {}
+    for query in queries:
+        passages = _passages(query.get("required_groups", []))
+        run = runs.get(query["id"], {})
+        seen_hits = set()
+        for hit_list in (run.get("raw_hits", []), run.get("hits", [])):
+            for hit in hit_list:
+                if id(hit) in seen_hits:
+                    continue
+                seen_hits.add(id(hit))
+                verified_ids = set(hit.get("evidence_ids", []))
+                if hit.get("evidence_id"):
+                    verified_ids.add(hit["evidence_id"])
+                for passage in passages:
+                    relative = Path(passage["path"])
+                    document_path = (root / relative).resolve()
+                    try:
+                        document_path.relative_to(root)
+                    except ValueError as error:
+                        raise ValueError("Evidence judgment path is outside the corpus") from error
+                    if document_path not in document_cache:
+                        document_cache[document_path] = document_path.read_text(
+                            encoding="utf-8"
+                        )
+                    passage_text = passage["text"]
+                    if (
+                        hit.get("path") == passage["path"]
+                        and passage_text in str(hit.get("text") or "")
+                        and document_cache[document_path].count(passage_text) == 1
+                    ):
+                        verified_ids.add(passage["evidence_id"])
+                hit["evidence_ids"] = sorted(verified_ids)
 
 
 def _passages(groups: list[list[dict]]) -> list[dict]:
@@ -68,25 +118,11 @@ def _passages(groups: list[list[dict]]) -> list[dict]:
     return passages
 
 
-def _matches(hit: dict, passage: dict, passages: list[dict]) -> bool:
+def _matches(hit: dict, passage: dict) -> bool:
     explicit = hit.get("evidence_id")
     if explicit is not None:
         return str(explicit) == passage["evidence_id"]
-    passage_text = passage.get("text")
-    if (
-        hit.get("path") != passage.get("path")
-        or not isinstance(passage_text, str)
-        or not passage_text
-        or passage_text not in str(hit.get("text") or "")
-    ):
-        return False
-    identical_locations = {
-        candidate["evidence_id"]
-        for candidate in passages
-        if candidate.get("path") == passage.get("path")
-        and candidate.get("text") == passage_text
-    }
-    return len(identical_locations) == 1
+    return passage["evidence_id"] in hit.get("evidence_ids", [])
 
 
 def _dcg(grades: list[int]) -> float:
@@ -95,7 +131,7 @@ def _dcg(grades: list[int]) -> float:
 
 def _ranked_group_matches(groups: list[list[dict]], hits: list[dict]):
     grade_value = {"direct": 2, "supporting": 1}
-    passages = _passages(groups)
+    _passages(groups)
     unused = set(range(len(groups)))
     for hit in hits:
         matching = [
@@ -103,12 +139,12 @@ def _ranked_group_matches(groups: list[list[dict]], hits: list[dict]):
                 max(
                     grade_value[passage["grade"]]
                     for passage in groups[index]
-                    if _matches(hit, passage, passages)
+                    if _matches(hit, passage)
                 ),
                 index,
             )
             for index in unused
-            if any(_matches(hit, passage, passages) for passage in groups[index])
+            if any(_matches(hit, passage) for passage in groups[index])
         ]
         if not matching:
             yield 0, None
@@ -139,7 +175,26 @@ def _has_explanation(hit: dict) -> bool:
     explanation = hit.get("explanation")
     if not isinstance(explanation, dict):
         return False
-    return bool(explanation.get("value"))
+    kind = explanation.get("kind")
+    value = explanation.get("value")
+    if kind == "match_spans":
+        return (
+            isinstance(value, list)
+            and bool(value)
+            and all(
+                isinstance(span, dict)
+                and isinstance(span.get("start"), int)
+                and isinstance(span.get("end"), int)
+                and 0 <= span["start"] < span["end"]
+                for span in value
+            )
+        )
+    if kind == "qmd_explain":
+        supported = {"blendedScore", "ftsScores", "vectorScores", "rrf", "lex", "vec"}
+        return isinstance(value, dict) and any(
+            key in value and value[key] is not None for key in supported
+        )
+    return False
 
 
 def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
@@ -157,6 +212,7 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
     exact_evidence_hits = 0
     context_tokens_top_5 = []
     explained_hits_top_5 = []
+    top_5_hit_count = 0
     for query in queries:
         run = runs.get(query["id"], {"hits": []})
         accepted_hits = run.get("hits", [])
@@ -171,6 +227,7 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
         explained_hits_top_5.append(
             sum(_has_explanation(hit) for hit in raw_hits[:5])
         )
+        top_5_hit_count += len(raw_hits[:5])
         groups = query.get("required_groups", [])
         if not groups:
             negative_queries += 1
@@ -179,11 +236,11 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
             if accepted_hits[:5]:
                 negative_false_positives += 1
             continue
-        passages = _passages(groups)
+        _passages(groups)
         for limit, recalls in ((5, recalls_at_5), (10, recalls_at_10)):
             satisfied = sum(
                 any(
-                    _matches(hit, passage, passages)
+                    _matches(hit, passage)
                     for hit in raw_hits[:limit]
                     for passage in group
                 )
@@ -236,5 +293,8 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
         ),
         "mean_explained_hits_top_5": (
             statistics.mean(explained_hits_top_5) if explained_hits_top_5 else 0.0
+        ),
+        "explanation_fidelity_rate_top_5": (
+            sum(explained_hits_top_5) / top_5_hit_count if top_5_hit_count else 0.0
         ),
     }

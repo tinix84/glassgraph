@@ -173,7 +173,17 @@ class QmdAdapter:
         raw_hits = []
         for hit in payload:
             content = str(hit.get("snippet") or "")
-            relative_path = Path(hit["file"]).resolve().relative_to(self.corpus_root).as_posix()
+            try:
+                relative_path = (
+                    Path(hit["file"])
+                    .resolve()
+                    .relative_to(self.corpus_root)
+                    .as_posix()
+                )
+            except ValueError as error:
+                raise RuntimeError(
+                    "QMD returned a result outside the benchmark corpus"
+                ) from error
             path = _with_prefix(relative_path, self.path_prefix)
             raw_hits.append(
                 {

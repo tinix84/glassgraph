@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -65,6 +66,24 @@ def _evidence_id(document_id, heading_id, passage_hash, ordinal=0):
             "passage_ordinal": ordinal,
         },
     )
+
+
+def _normalize_decimal(value):
+    normalized = format(Decimal(value), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    if normalized in {"-0", ""}:
+        return "0"
+    if normalized.startswith("."):
+        return "0" + normalized
+    if normalized.startswith("-."):
+        return "-0" + normalized[1:]
+    return normalized
+
+
+def _normalize_integer(value):
+    normalized = str(int(value, 10))
+    return "0" if normalized == "-0" else normalized
 
 
 def _heading_instances(path, document_id):
@@ -164,6 +183,11 @@ def test_identity_fixture_matches_all_adr_0013_golden_vectors():
     assert golden["scalar_assertion_id"] == assertion_id
 
 
+def test_scalar_golden_vectors_normalize_all_adr_inputs():
+    assert {_normalize_decimal(value) for value in ("0.980", "+0.98", "00.9800", ".98")} == {"0.98"}
+    assert {_normalize_integer(value) for value in ("+001", "01", "1")} == {"1"}
+
+
 def test_public_queries_cite_computed_evidence_ids():
     payload = json.loads((FIXTURE / "queries.json").read_text(encoding="utf-8"))
     for query in payload["queries"]:
@@ -191,3 +215,24 @@ def test_public_benchmark_manifest_matches_frozen_inputs(retrieval_benchmark_mod
         "public": [query["id"] for query in queries]
     }
     assert manifest["adjudication_date"] == "2026-11-09"
+
+
+def test_corpus_snapshot_hash_normalizes_checkout_line_endings(
+    tmp_path, retrieval_benchmark_mod
+):
+    crlf_root = tmp_path / "corpus"
+    crlf_root.mkdir()
+    for source in (FIXTURE / "corpus").glob("*.md"):
+        normalized = source.read_text(encoding="utf-8").replace("\r\n", "\n")
+        (crlf_root / source.name).write_bytes(normalized.replace("\n", "\r\n").encode())
+
+    assert retrieval_benchmark_mod.corpus_snapshot_hash(crlf_root) == (
+        retrieval_benchmark_mod.corpus_snapshot_hash(FIXTURE / "corpus")
+    )
+
+
+def test_public_fixture_forces_lf_checkout():
+    attributes = (ROOT := FIXTURE.parents[3]) / ".gitattributes"
+    assert "tests/fixtures/benchmark/v1/** text eol=lf" in attributes.read_text(
+        encoding="utf-8"
+    )
