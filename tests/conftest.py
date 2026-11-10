@@ -112,6 +112,21 @@ def stage2_mod():
     return _load("stage2")
 
 
+@pytest.fixture(scope="session")
+def retrieval_benchmark_mod():
+    return _load("retrieval_benchmark")
+
+
+@pytest.fixture(scope="session")
+def retrieval_backends_mod():
+    return _load("retrieval_backends")
+
+
+@pytest.fixture(scope="session")
+def retrieval_benchmark_cli_mod():
+    return _load("retrieval_benchmark_cli")
+
+
 @pytest.fixture
 def disambiguation_yaml(tmp_path):
     path = tmp_path / "disambiguation.yaml"

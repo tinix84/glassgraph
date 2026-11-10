@@ -35,6 +35,41 @@ Outputs `.tools/extraction-cache/{stem}.json` with `entities` (Stage 1 hits) and
 
 See `python link.py --help` for the full command list (extract, backfill, lint, explain, suggest, history).
 
+## Retrieval benchmark
+
+`retrieval_benchmark_cli.py` measures GrooveSeek or QMD with the evidence-level metrics from ADR-0014. The command uses one metric implementation for the public fixture and the private benchmark.
+
+Run the public fixture with GrooveSeek:
+
+```powershell
+python retrieval_benchmark_cli.py `
+  --queries tests/fixtures/benchmark/v1/queries.json `
+  --backend grooveseek `
+  --groove-executable <groove-command> `
+  --knowledge-base <fixture-index> `
+  --tokenizer <pinned-tokenizer.json> `
+  --privacy public
+```
+
+Run a private split only on the local computer. The command rejects an incomplete or unadjudicated 60-record workbook.
+
+```powershell
+python retrieval_benchmark_cli.py `
+  --queries <private-authoring-workbook.json> `
+  --backend grooveseek `
+  --groove-executable <groove-command> `
+  --knowledge-base <private-index> `
+  --tokenizer <pinned-tokenizer.json> `
+  --path-prefix wiki `
+  --privacy private `
+  --split development `
+  --output <local-private-report.json>
+```
+
+The public command prints aggregate metrics only. The private command writes its aggregate report to the specified local file and prints no benchmark data.
+
+Positive retrieval metrics use ranked raw hits. Negative false-positive metrics use accepted hits after backend confidence abstention. The report also keeps the raw negative false-positive rate so that confidence behavior is visible.
+
 ## Architecture
 
 ```
@@ -47,6 +82,9 @@ explain.py       Per-source debug view (every hit + span + context)
 suggest.py       Alias candidate proposer (TF/DF on raw bodies)
 lint.py          8 defensive lints on wiki YAML, alias collisions, broken wikilinks, etc.
 history.py       Append-only backfill history with per-run deltas
+retrieval_benchmark.py      Evidence-group metrics shared by all backends
+retrieval_backends.py       GrooveSeek and QMD result adapters
+retrieval_benchmark_cli.py  Local public/private benchmark command
 
 comparison/      Head-to-head comparison framework vs graphify
   load_graphify.py     Defensive parser for graphify graph.json
