@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
 from tokenizers import Tokenizer
@@ -32,6 +33,54 @@ PRIVATE_IRRELEVANT_ID = "sha256:c9870737134c02427c7619a41c77e35fba8605c48340d220
 
 def _evidence_id(seed):
     return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("backend", ["grooveseek", "qmd"])
+def test_backend_settings_identity_changes_when_artifact_bytes_change(
+    tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod, backend
+):
+    tokenizer = tmp_path / "tokenizer.json"
+    executable = tmp_path / "backend.exe"
+    script = tmp_path / "qmd.js"
+    index = tmp_path / "index.sqlite"
+    knowledge_base = tmp_path / "corpus"
+    knowledge_base.mkdir()
+    groove_index = tmp_path / ".groove.db"
+    for path, value in (
+        (tokenizer, "tokenizer-v1"),
+        (executable, "executable-v1"),
+        (script, "script-v1"),
+        (index, "index-v1"),
+        (groove_index, "groove-index-v1"),
+    ):
+        path.write_text(value, encoding="utf-8")
+    args = SimpleNamespace(
+        backend=backend,
+        limit=10,
+        path_prefix=None,
+        tokenizer=tokenizer,
+        groove_executable=str(executable),
+        knowledge_base=str(knowledge_base),
+        node_executable=str(executable),
+        qmd_script=str(script),
+        index=str(index),
+        collection="fixture",
+        corpus_root=knowledge_base,
+    )
+
+    original = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+    target = executable if backend == "grooveseek" else index
+    target.write_text("replacement-v2", encoding="utf-8")
+    changed = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+
+    assert all(
+        value.startswith("sha256:")
+        for value in original["artifact_hashes"].values()
+        if value is not None
+    )
+    assert retrieval_benchmark_mod.backend_settings_lock(
+        original
+    ) != retrieval_benchmark_mod.backend_settings_lock(changed)
 
 
 def _manifest(records, retrieval_benchmark_mod, split_membership, corpus_root):
@@ -759,6 +808,11 @@ def test_private_evaluation_requires_manifest_settings_lock(
         "tokenizer": None,
         "executable": "groove",
         "knowledge_base": "corpus",
+        "artifact_hashes": {
+            "tokenizer": None,
+            "executable": None,
+            "index": None,
+        },
     })
     args_lock = []
     if invalid_case in {"mismatch", "changed-settings"}:
@@ -806,6 +860,11 @@ def test_private_evaluation_records_matching_settings_lock(
         "tokenizer": None,
         "executable": "groove",
         "knowledge_base": "corpus",
+        "artifact_hashes": {
+            "tokenizer": None,
+            "executable": None,
+            "index": None,
+        },
     })
     payload["manifest"]["locked_backend_settings"] = {
         "grooveseek": settings_lock

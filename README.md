@@ -84,7 +84,7 @@ The query file contains the frozen manifest and ADR-0013 evidence IDs. Each posi
 
 Benchmark versions are content-addressed as `public-v1-<identity-hash>` or `private-v1-<identity-hash>`. The identity covers both the frozen query set and the judgment set. A query, split, or judgment correction therefore requires a new version. Result limits below 10 are rejected because the report publishes Recall@10 and nDCG@10.
 
-Development runs can tune settings. Each report records a settings hash derived from the backend, result limit, path prefix, tokenizer reference, and backend-specific index or executable arguments. Before a private evaluation run, store the selected development hash under `manifest.locked_backend_settings.<backend>`. Pass the same value with `--settings-lock`. The runner recomputes the hash. It rejects an evaluation when the lock is missing, different, or paired with changed settings.
+Development runs can tune settings. Each report records a settings hash derived from the backend, result limit, path prefix, tokenizer reference, and backend-specific index or executable arguments. The settings identity includes content hashes for the tokenizer, backend executable or package, and derived index. The report records these artifact hashes. Before a private evaluation run, store the selected development hash under `manifest.locked_backend_settings.<backend>`. Pass the same value with `--settings-lock`. The runner recomputes the hash. It rejects an evaluation when the lock is missing, different, or paired with changed settings.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 

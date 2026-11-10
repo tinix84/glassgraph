@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
+import shutil
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -61,18 +63,96 @@ def load_token_counter(path: Path):
     return count_tokens
 
 
+def _file_sha256(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _directory_sha256(path: Path | None) -> str | None:
+    if path is None or not path.is_dir():
+        return None
+    files = sorted(item for item in path.rglob("*") if item.is_file())
+    if not files:
+        return None
+    digest = hashlib.sha256()
+    for item in files:
+        relative = item.relative_to(path).as_posix().encode("utf-8")
+        file_hash = _file_sha256(item).encode("ascii")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(file_hash)
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def _executable_sha256(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = Path(value)
+    if not candidate.is_file():
+        resolved = shutil.which(value)
+        candidate = Path(resolved) if resolved else candidate
+    return _file_sha256(candidate)
+
+
+def _groove_index_sha256(value: str | None) -> str | None:
+    if not value:
+        return None
+    root = Path(value)
+    if root.is_file():
+        return _file_sha256(root)
+    for candidate in (root / ".groove.db", root.parent / ".groove.db"):
+        fingerprint = _file_sha256(candidate)
+        if fingerprint:
+            return fingerprint
+    return None
+
+
+def _qmd_package_sha256(value: str | None) -> str | None:
+    if not value:
+        return None
+    script = Path(value)
+    package_root = script.parent.parent
+    if (package_root / "package.json").is_file():
+        return _directory_sha256(package_root)
+    return _file_sha256(script)
+
+
+def _qmd_index_sha256(value: str | None) -> str | None:
+    if not value:
+        return None
+    direct = Path(value)
+    if direct.is_file():
+        return _file_sha256(direct)
+    cached = Path.home() / ".cache" / "qmd" / f"{value}.sqlite"
+    return _file_sha256(cached)
+
+
 def _backend_settings_payload(args) -> dict:
     common = {
         "backend": args.backend,
         "limit": args.limit,
         "path_prefix": args.path_prefix,
         "tokenizer": str(args.tokenizer) if args.tokenizer else None,
+        "artifact_hashes": {
+            "tokenizer": _file_sha256(args.tokenizer),
+        },
     }
     if args.backend == "grooveseek":
         return {
             **common,
             "executable": args.groove_executable,
             "knowledge_base": args.knowledge_base,
+            "artifact_hashes": {
+                **common["artifact_hashes"],
+                "executable": _executable_sha256(args.groove_executable),
+                "index": _groove_index_sha256(args.knowledge_base),
+            },
         }
     return {
         **common,
@@ -81,6 +161,12 @@ def _backend_settings_payload(args) -> dict:
         "index": args.index,
         "collection": args.collection,
         "corpus_root": str(args.corpus_root) if args.corpus_root else None,
+        "artifact_hashes": {
+            **common["artifact_hashes"],
+            "node_executable": _executable_sha256(args.node_executable),
+            "qmd_package": _qmd_package_sha256(args.qmd_script),
+            "index": _qmd_index_sha256(args.index),
+        },
     }
 
 
@@ -264,8 +350,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    settings_identity = _backend_settings_payload(args)
     actual_settings_lock = retrieval_benchmark.backend_settings_lock(
-        _backend_settings_payload(args)
+        settings_identity
     )
     measurements = (
         args.setup_time_ms,
@@ -427,6 +514,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             "version": payload["benchmark_version"],
             "corpus_verified": True,
             "settings_lock": actual_settings_lock,
+            "artifact_hashes": settings_identity["artifact_hashes"],
         },
         "measurements": {
             "setup_time_ms": args.setup_time_ms,
