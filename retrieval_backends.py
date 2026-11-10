@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -11,8 +12,17 @@ import psutil
 
 
 def _with_prefix(path: str, prefix: str | None) -> str:
-    normalized = path.replace("\\", "/").lstrip("./")
-    return f"{prefix.strip('/')}/{normalized}" if prefix else normalized
+    normalized = path.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized):
+        raise RuntimeError("Backend returned an unsafe result path")
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if not parts or ".." in parts:
+        raise RuntimeError("Backend returned an unsafe result path")
+    relative = "/".join(parts)
+    if prefix is None:
+        return relative
+    safe_prefix = _with_prefix(prefix, None)
+    return f"{safe_prefix}/{relative}"
 
 
 def run_process(args: list[str], environment: dict[str, str]) -> dict:

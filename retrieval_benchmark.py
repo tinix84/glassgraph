@@ -61,6 +61,11 @@ def benchmark_version(privacy: str, records: list[dict]) -> str:
     return f"{privacy}-v1-{digest[:12]}"
 
 
+def backend_settings_lock(settings: dict) -> str:
+    """Return the frozen identity of one backend evaluation configuration."""
+    return _canonical_hash("glassgraph:benchmark-backend-settings:v1", settings)
+
+
 def corpus_snapshot_hash(corpus_root: str | Path) -> str:
     """Return the frozen hash of all Markdown bytes below one corpus root."""
     root = Path(corpus_root)
@@ -108,7 +113,7 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         ),
         "level": 0,
         "title": "",
-        "start": 0,
+        "start": -1,
         "line": 1,
         "path": [],
     }
@@ -147,7 +152,44 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
             headings.append(heading)
             stack.append(heading)
         offset += len(line)
+    for index, heading in enumerate(headings):
+        heading["end"] = (
+            headings[index + 1]["start"] if index + 1 < len(headings) else len(text)
+        )
     return headings
+
+
+def _original_utf8_byte_offset(original_text: str, normalized_offset: int) -> int:
+    normalized_cursor = 0
+    byte_cursor = 0
+    for original_line in original_text.splitlines(keepends=True):
+        if original_line.endswith("\r\n"):
+            content, ending = original_line[:-2], "\r\n"
+        elif original_line.endswith(("\r", "\n")):
+            content, ending = original_line[:-1], original_line[-1]
+        else:
+            content, ending = original_line, ""
+        normalized_content = unicodedata.normalize("NFC", content)
+        content_end = normalized_cursor + len(normalized_content)
+        if normalized_offset <= content_end:
+            column = normalized_offset - normalized_cursor
+            candidates = [
+                len(content[:index].encode("utf-8"))
+                for index in range(len(content) + 1)
+                if len(unicodedata.normalize("NFC", content[:index])) == column
+            ]
+            if not candidates:
+                raise ValueError("Normalized evidence coordinate has no source byte boundary")
+            return byte_cursor + max(candidates)
+        normalized_cursor = content_end
+        if ending:
+            normalized_cursor += 1
+            if normalized_offset <= normalized_cursor:
+                return byte_cursor + len(original_line.encode("utf-8"))
+        byte_cursor += len(original_line.encode("utf-8"))
+    if normalized_offset == normalized_cursor:
+        return byte_cursor
+    raise ValueError("Normalized evidence coordinate is outside the source document")
 
 
 def derive_evidence_records(
@@ -163,9 +205,10 @@ def derive_evidence_records(
     except ValueError as error:
         raise ValueError("Evidence judgment path is outside the corpus") from error
     source_bytes = source_path.read_bytes()
+    original_text = source_bytes.decode("utf-8")
     text = unicodedata.normalize(
         "NFC",
-        source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"),
+        original_text.replace("\r\n", "\n").replace("\r", "\n"),
     )
     passage = unicodedata.normalize(
         "NFC",
@@ -191,6 +234,10 @@ def derive_evidence_records(
             (item for item in headings if item["start"] <= occurrence),
             key=lambda item: item["start"],
         )
+        occurrence_end = occurrence + len(passage)
+        if occurrence_end > heading["end"]:
+            start = occurrence + max(1, len(passage))
+            continue
         ordinal_key = (heading["id"], passage_hash)
         passage_ordinal = ordinals.get(ordinal_key, 0)
         ordinals[ordinal_key] = passage_ordinal + 1
@@ -216,6 +263,12 @@ def derive_evidence_records(
                 "heading_path": heading["path"],
                 "line_start": line_start,
                 "line_end": max(line_start, line_end),
+                "utf8_byte_start": _original_utf8_byte_offset(
+                    original_text, occurrence
+                ),
+                "utf8_byte_end": _original_utf8_byte_offset(
+                    original_text, occurrence_end
+                ),
             }
         )
         start = occurrence + max(1, len(passage))
@@ -236,9 +289,7 @@ def validate_evidence_judgments(records: list[dict], corpus_root: str | Path) ->
                 and record["heading"] == judgment.get("heading", record["heading"])
             ]
             if len(matching) != 1:
-                raise ValueError(
-                    f"Query {query['id']} has an invalid ADR-0013 evidence identity"
-                )
+                raise ValueError("A benchmark record has an invalid evidence identity")
 
 
 def verify_evidence_hits(
@@ -303,9 +354,6 @@ def _passages(groups: list[list[dict]]) -> list[dict]:
 
 
 def _matches(hit: dict, passage: dict) -> bool:
-    explicit = hit.get("evidence_id")
-    if explicit is not None:
-        return str(explicit) == passage["evidence_id"]
     return passage["evidence_id"] in hit.get("evidence_ids", [])
 
 

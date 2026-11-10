@@ -63,6 +63,48 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
     assert run["peak_working_set_bytes"] == 123_456
 
 
+def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends_mod):
+    adapter = retrieval_backends_mod.GrooveSeekAdapter(
+        executable="groove",
+        knowledge_base="corpus",
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({
+                "results": [{"score": 1, "path": ".notes.md", "content": "Hidden note"}],
+                "low_confidence": False,
+            }),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 2,
+    )
+
+    run = adapter.query("note", limit=10)
+
+    assert run["hits"][0]["path"] == ".notes.md"
+
+
+@pytest.mark.parametrize("unsafe_path", ["../answer.md", "/answer.md", "C:/answer.md"])
+def test_grooveseek_adapter_rejects_nonrelative_result_paths(
+    retrieval_backends_mod, unsafe_path
+):
+    adapter = retrieval_backends_mod.GrooveSeekAdapter(
+        executable="groove",
+        knowledge_base="corpus",
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({
+                "results": [{"score": 1, "path": unsafe_path, "content": "Answer"}],
+                "low_confidence": False,
+            }),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe result path"):
+        adapter.query("answer", limit=10)
+
+
 def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
     tmp_path, retrieval_backends_mod
 ):

@@ -183,6 +183,38 @@ def test_identity_fixture_matches_all_adr_0013_golden_vectors():
     assert golden["scalar_assertion_id"] == assertion_id
 
 
+def test_production_derivation_matches_golden_evidence_vectors(
+    retrieval_benchmark_mod,
+):
+    golden = json.loads((FIXTURE / "golden-identifiers.json").read_text(encoding="utf-8"))
+    identity_root = FIXTURE / "identity-cases"
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        identity_root,
+        {
+            "path": "wiki/example.md",
+            "text": "Efficiency is 98%.",
+        },
+    )
+    source = (identity_root / "wiki" / "example.md").read_bytes()
+    passage = b"Efficiency is 98%.\n"
+
+    assert [record["evidence_id"] for record in records[:2]] == [
+        golden["first_evidence_id"],
+        golden["second_evidence_id"],
+    ]
+    assert records[0]["utf8_byte_start"] == source.index(passage)
+    assert records[0]["utf8_byte_end"] == source.index(passage) + len(passage)
+
+    delete_records = retrieval_benchmark_mod.derive_evidence_records(
+        identity_root / "delete-before",
+        {
+            "path": "wiki/delete-demo.md",
+            "text": "This document exists only in the before snapshot.",
+        },
+    )
+    assert delete_records[0]["heading_path"] == ["Delete Demo"]
+
+
 def test_scalar_golden_vectors_normalize_all_adr_inputs():
     assert {_normalize_decimal(value) for value in ("0.980", "+0.98", "00.9800", ".98")} == {"0.98"}
     assert {_normalize_integer(value) for value in ("+001", "01", "1")} == {"1"}

@@ -64,6 +64,11 @@ wrongSnapshot.index.corpus_snapshot_hash = 'sha256:' + '0'.repeat(64);
 const snapshotRejected = QueryContract.verify(wrongSnapshot);
 if (snapshotRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong corpus snapshot was certified');
 
+const wrongBackendSnapshot = QueryContract.execute('qmd', 'fresh', 'search');
+wrongBackendSnapshot.execution.backend_snapshot_hash = 'sha256:' + '0'.repeat(64);
+const backendSnapshotRejected = QueryContract.verify(wrongBackendSnapshot);
+if (backendSnapshotRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong backend snapshot was certified');
+
 const staleExplain = QueryContract.execute('groove', 'stale', 'explain');
 if (staleExplain.results.some(result => (result.evidence_ids || []).length)) throw new Error('stale explain exposed evidence ID');
 const freshExplain = QueryContract.execute('groove', 'fresh', 'explain');

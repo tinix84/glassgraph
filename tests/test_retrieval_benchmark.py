@@ -292,6 +292,27 @@ def test_evaluate_rejects_wrong_explicit_evidence_id(retrieval_benchmark_mod):
     assert report["evidence_span_accuracy"] == 0.0
 
 
+def test_evaluate_rejects_unverified_singular_evidence_id(retrieval_benchmark_mod):
+    queries = [{
+        "id": "q1",
+        "required_groups": [[{
+            "evidence_id": "expected-id",
+            "path": "answer.md",
+            "text": "Exact answer.",
+            "grade": "direct",
+        }]],
+    }]
+    runs = {"q1": {"hits": [{
+        "evidence_id": "expected-id",
+        "path": "wrong.md",
+        "text": "Unrelated text.",
+    }]}}
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["group_recall_at_5"] == 0.0
+
+
 def test_evaluate_rejects_ambiguous_unverified_duplicate_passage(
     retrieval_benchmark_mod,
 ):
@@ -434,6 +455,22 @@ def test_benchmark_version_changes_with_judgment_correction(retrieval_benchmark_
     assert corrected_version != original_version
 
 
+def test_backend_settings_lock_changes_with_retrieval_cutoff(retrieval_benchmark_mod):
+    settings = {
+        "backend": "grooveseek",
+        "limit": 10,
+        "path_prefix": "wiki",
+        "executable": "groove",
+        "knowledge_base": "corpus",
+    }
+
+    original = retrieval_benchmark_mod.backend_settings_lock(settings)
+    changed = retrieval_benchmark_mod.backend_settings_lock({**settings, "limit": 11})
+
+    assert original.startswith("sha256:")
+    assert changed != original
+
+
 def test_verify_evidence_hits_uses_line_locator_for_repeated_passage(
     tmp_path, retrieval_benchmark_mod
 ):
@@ -463,3 +500,54 @@ def test_verify_evidence_hits_uses_line_locator_for_repeated_passage(
     retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
 
     assert runs["q1"]["hits"][0]["evidence_ids"] == [judgment["evidence_id"]]
+
+
+def test_derive_evidence_uses_first_line_heading_instead_of_root(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# Answer\n\nUnique answer.\n", encoding="utf-8"
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Unique answer."},
+    )
+
+    assert records[0]["heading"] == "Answer"
+    assert records[0]["heading_path"] == ["Answer"]
+
+
+def test_derive_evidence_rejects_passage_crossing_heading_boundary(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "## First\n\nAnswer one.\n\n## Second\n\nAnswer two.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {
+            "path": "answer.md",
+            "text": "Answer one.\n\n## Second\n\nAnswer two.",
+        },
+    )
+
+    assert records == []
+
+
+def test_derive_evidence_returns_original_utf8_byte_span(
+    tmp_path, retrieval_benchmark_mod
+):
+    source = "# Résultats\r\n\r\nCafe\u0301.\r\n".encode("utf-8")
+    (tmp_path / "answer.md").write_bytes(source)
+    passage = "Cafe\u0301.\r\n".encode("utf-8")
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Café."},
+    )
+
+    assert records[0]["utf8_byte_start"] == source.index(passage)
+    assert records[0]["utf8_byte_end"] == source.index(passage) + len(passage)

@@ -451,6 +451,93 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
     assert "evaluation private positive" not in output_path.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("invalid_case", ["missing", "mismatch", "changed-settings"])
+def test_private_evaluation_requires_manifest_settings_lock(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    invalid_case,
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
+    expected_lock = retrieval_benchmark_mod.backend_settings_lock({
+        "backend": "grooveseek",
+        "limit": 10,
+        "path_prefix": "wiki",
+        "tokenizer": None,
+        "executable": "groove",
+        "knowledge_base": "corpus",
+    })
+    args_lock = []
+    if invalid_case in {"mismatch", "changed-settings"}:
+        payload["manifest"]["locked_backend_settings"] = {
+            "grooveseek": expected_lock
+        }
+        args_lock = [
+            "--settings-lock",
+            _evidence_id("other-settings")
+            if invalid_case == "mismatch"
+            else expected_lock,
+        ]
+    workbook_path = tmp_path / "workbook.json"
+    output_path = tmp_path / "report.json"
+    workbook_path.write_text(json.dumps(payload), encoding="utf-8")
+    args = _private_args(workbook_path, output_path, corpus_root)
+    args[args.index("development")] = "evaluation"
+    args.extend(args_lock)
+    if invalid_case == "changed-settings":
+        args.extend(["--limit", "11"])
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            args,
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert "locked backend settings" in capsys.readouterr().err
+
+
+def test_private_evaluation_records_matching_settings_lock(
+    tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
+    settings_lock = retrieval_benchmark_mod.backend_settings_lock({
+        "backend": "grooveseek",
+        "limit": 10,
+        "path_prefix": "wiki",
+        "tokenizer": None,
+        "executable": "groove",
+        "knowledge_base": "corpus",
+    })
+    payload["manifest"]["locked_backend_settings"] = {
+        "grooveseek": settings_lock
+    }
+    workbook_path = tmp_path / "workbook.json"
+    output_path = tmp_path / "report.json"
+    workbook_path.write_text(json.dumps(payload), encoding="utf-8")
+    args = _private_args(workbook_path, output_path, corpus_root)
+    args[args.index("development")] = "evaluation"
+    args.extend(["--settings-lock", settings_lock])
+
+    retrieval_benchmark_cli_mod.main(
+        args,
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({"results": [], "low_confidence": False}),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["split"] == "evaluation"
+    assert report["benchmark"]["settings_lock"] == settings_lock
+
+
 def test_public_cli_runs_qmd_adapter(
     tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
@@ -952,6 +1039,53 @@ def test_cli_rejects_corpus_snapshot_mismatch_before_backend_execution(
         )
 
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("invalid_case", ["missing-source", "wrong-evidence-id"])
+def test_cli_redacts_private_evidence_validation_failures(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    invalid_case,
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    payload = _private_payload(retrieval_benchmark_mod, corpus_root)
+    private_id = payload["records"][0]["id"]
+    secret_path = "wiki/secret-private-file.md"
+    if invalid_case == "missing-source":
+        payload["records"][0]["required_groups"][0][0]["path"] = secret_path
+    else:
+        payload["records"][0]["required_groups"][0][0]["evidence_id"] = (
+            "sha256:" + "0" * 64
+        )
+    records = payload["records"]
+    payload["benchmark_version"] = retrieval_benchmark_mod.benchmark_version(
+        "private", records
+    )
+    payload["manifest"] = _manifest(
+        records,
+        retrieval_benchmark_mod,
+        payload["manifest"]["split_membership"],
+        corpus_root,
+    )
+    workbook_path = tmp_path / "private-workbook.json"
+    output_path = tmp_path / "private-report.json"
+    workbook_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert private_id not in stderr
+    assert secret_path not in stderr
+    assert str(corpus_root) not in stderr
+    assert "Benchmark evidence verification failed" in stderr
 
 
 def test_private_cli_rejects_unexpected_distribution_bucket(

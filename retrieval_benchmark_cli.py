@@ -61,6 +61,29 @@ def load_token_counter(path: Path):
     return count_tokens
 
 
+def _backend_settings_payload(args) -> dict:
+    common = {
+        "backend": args.backend,
+        "limit": args.limit,
+        "path_prefix": args.path_prefix,
+        "tokenizer": str(args.tokenizer) if args.tokenizer else None,
+    }
+    if args.backend == "grooveseek":
+        return {
+            **common,
+            "executable": args.groove_executable,
+            "knowledge_base": args.knowledge_base,
+        }
+    return {
+        **common,
+        "node_executable": args.node_executable,
+        "qmd_script": args.qmd_script,
+        "index": args.index,
+        "collection": args.collection,
+        "corpus_root": str(args.corpus_root) if args.corpus_root else None,
+    }
+
+
 def validate_private_workbook(payload: dict) -> None:
     expected = {
         ("development", "positive"): 30,
@@ -200,6 +223,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark-corpus-root", type=Path, required=True)
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--path-prefix")
+    parser.add_argument("--settings-lock")
     parser.add_argument("--setup-time-ms", type=float, required=True)
     parser.add_argument("--full-build-time-ms", type=float, required=True)
     parser.add_argument("--no-change-update-ms", type=float, required=True)
@@ -212,6 +236,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    actual_settings_lock = retrieval_benchmark.backend_settings_lock(
+        _backend_settings_payload(args)
+    )
     measurements = (
         args.setup_time_ms,
         args.full_build_time_ms,
@@ -254,12 +281,27 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             args.privacy,
             args.benchmark_corpus_root,
         )
+    except ValueError as error:
+        parser.error(str(error))
+    try:
         retrieval_benchmark.validate_evidence_judgments(
             records,
             args.benchmark_corpus_root,
         )
-    except ValueError as error:
-        parser.error(str(error))
+    except (OSError, UnicodeError, ValueError):
+        parser.error("Benchmark evidence verification failed")
+    if args.privacy == "private" and args.split == "evaluation":
+        expected_lock = (
+            payload.get("manifest", {})
+            .get("locked_backend_settings", {})
+            .get(args.backend)
+        )
+        if (
+            not SHA256_PATTERN.fullmatch(str(args.settings_lock or ""))
+            or args.settings_lock != expected_lock
+            or args.settings_lock != actual_settings_lock
+        ):
+            parser.error("Private evaluation requires locked backend settings")
     if args.privacy == "private":
         queries = [
             record for record in records if record.get("split") == args.split
@@ -318,6 +360,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         "benchmark": {
             "version": payload["benchmark_version"],
             "corpus_verified": True,
+            "settings_lock": actual_settings_lock,
         },
         "measurements": {
             "setup_time_ms": args.setup_time_ms,

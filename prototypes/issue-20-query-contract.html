@@ -97,6 +97,7 @@
 
       const verifiedEvidence = {
         corpus_snapshot_hash:IDS.corpus,
+        backend_snapshot_hash:IDS.backend,
         path:'wiki/example.md',
         passage:'Efficiency is 98%.\n',
         locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:74 } },
@@ -183,7 +184,7 @@
           execution:executionFor(backend), index:indexFor(indexState), results:[], warnings:[]
         };
         if (!supported) {
-          response.warnings.push({ code:'operation_not_supported', message:`${operation} is unavailable in the model-free lane; Glassgraph does not silently substitute lexical search.` });
+          response.warnings.push({ code:'operation_not_supported', message:`${operation} is unavailable in the model-free lane. Glassgraph does not silently substitute lexical search.` });
           return response;
         }
         if (operation === 'search' || operation === 'similar') response.results = [candidateResult(backend, indexState)];
@@ -207,6 +208,11 @@
         }
         if (next.index.corpus_snapshot_hash !== verifiedEvidence.corpus_snapshot_hash) {
           hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'corpus_snapshot_mismatch' };
+          next.status = 'rejected';
+          return next;
+        }
+        if (next.execution.backend_snapshot_hash !== verifiedEvidence.backend_snapshot_hash) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'backend_snapshot_mismatch' };
           next.status = 'rejected';
           return next;
         }
