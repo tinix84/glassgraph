@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from pathlib import Path
 
 import pytest
 
@@ -78,7 +79,9 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
         "bge-small-en-v1.5",
         "--kb-path",
     ]
-    assert invoked["environment"]["FASTEMBED_CACHE_DIR"] == "model-cache"
+    assert invoked["environment"]["FASTEMBED_CACHE_DIR"] == str(
+        Path("model-cache").resolve()
+    )
 
 
 def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends_mod):
@@ -185,6 +188,11 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
         "QMD_CONFIG_DIR": str((tmp_path / "config").resolve()),
         "QMD_EMBED_MODEL": str((tmp_path / "model.gguf").resolve()),
         "QMD_FORCE_CPU": "1",
+        "QMD_EMBED_CONTEXT_SIZE": None,
+        "QMD_EMBED_PARALLELISM": None,
+        "QMD_EXPAND_CONTEXT_SIZE": None,
+        "QMD_LLAMA_GPU": None,
+        "QMD_RERANK_CONTEXT_SIZE": None,
         "XDG_CACHE_HOME": None,
         "XDG_CONFIG_HOME": None,
     }
@@ -230,6 +238,59 @@ def test_backend_adapters_reject_error_objects(
         )
 
     with pytest.raises(RuntimeError, match="invalid response"):
+        adapter.query("query", limit=10)
+
+
+def test_grooveseek_adapter_rejects_malformed_scoring_fields(
+    retrieval_backends_mod,
+):
+    adapter = retrieval_backends_mod.GrooveSeekAdapter(
+        executable="groove",
+        knowledge_base="corpus",
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({
+                "results": [{
+                    "path": ["wrong type"],
+                    "content": {"text": "ignored"},
+                    "score": "high",
+                    "match_spans": [],
+                }],
+                "low_confidence": "true",
+            }),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        adapter.query("query", limit=10)
+
+
+def test_qmd_adapter_requires_vector_scores_for_hybrid_run(
+    tmp_path, retrieval_backends_mod
+):
+    adapter = retrieval_backends_mod.QmdAdapter(
+        node_executable="node",
+        qmd_script="qmd",
+        index="index",
+        collection="collection",
+        corpus_root=tmp_path,
+        process_runner=lambda *_args: {
+            "stdout": json.dumps([{
+                "score": 1.0,
+                "file": str(tmp_path / "answer.md"),
+                "line": 1,
+                "snippet": "lexical-only",
+                "explain": {"ftsScores": [1.0], "vectorScores": []},
+            }]),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="vector retrieval"):
         adapter.query("query", limit=10)
 
 

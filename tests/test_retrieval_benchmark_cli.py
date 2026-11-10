@@ -11,6 +11,7 @@ import pytest
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
+import yaml
 
 
 MEASUREMENT_ARGS = [
@@ -157,6 +158,24 @@ def test_sqlite_snapshot_hash_includes_committed_wal_rows(
     assert before != after
 
 
+@pytest.mark.parametrize("special_name", ["index#1.sqlite", "index%2esqlite"])
+def test_sqlite_snapshot_hash_escapes_uri_metacharacters(
+    tmp_path, retrieval_benchmark_cli_mod, special_name
+):
+    ordinary = tmp_path / "index.sqlite"
+    special = tmp_path / special_name
+    for database, value in ((ordinary, "ordinary"), (special, "special")):
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE evidence (value TEXT)")
+            connection.execute("INSERT INTO evidence VALUES (?)", (value,))
+
+    first = retrieval_benchmark_cli_mod._sqlite_snapshot_sha256(special)
+    with sqlite3.connect(special) as connection:
+        connection.execute("INSERT INTO evidence VALUES ('changed')")
+
+    assert retrieval_benchmark_cli_mod._sqlite_snapshot_sha256(special) != first
+
+
 def test_groove_index_hash_uses_database_next_to_knowledge_base(
     tmp_path, retrieval_benchmark_cli_mod
 ):
@@ -196,7 +215,7 @@ def test_qmd_config_must_use_pinned_model_artifact(
     )
 
     config.write_text("collections: {}\n", encoding="utf-8")
-    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
 
     config.write_text(
         "models:\n  embed: hf:remote/model/file.gguf\n", encoding="utf-8"
@@ -204,9 +223,77 @@ def test_qmd_config_must_use_pinned_model_artifact(
     assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
 
     config.write_text(
-        f"models:\n  embed: {json.dumps(str(model))}\n", encoding="utf-8"
+        f"models:\n  embed: {json.dumps(str(model))}\n"
+        "  generate: local-generate.gguf\n"
+        "  rerank: local-rerank.gguf\n",
+        encoding="utf-8",
     )
     assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+
+
+def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    database = tmp_path / "index.sqlite"
+    config_payload = {
+        "collections": {"fixture": {"path": ".", "pattern": "**/*.md"}},
+        "models": {
+            "embed": str((tmp_path / "model.gguf").resolve()),
+            "generate": "local-generate.gguf",
+            "rerank": "local-rerank.gguf",
+        },
+    }
+    config_hash = hashlib.sha256(
+        json.dumps(
+            config_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE store_config (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY,
+                collection TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                active INTEGER NOT NULL
+            );
+            CREATE TABLE content_vectors (
+                hash TEXT NOT NULL,
+                model TEXT NOT NULL,
+                total_chunks INTEGER NOT NULL
+            );
+            CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
+            CREATE TABLE vectors_vec_rowids (id TEXT NOT NULL);
+            """
+        )
+        connection.execute(
+            "INSERT INTO store_config VALUES ('config_hash', ?)",
+            (config_hash,),
+        )
+        connection.execute(
+            "INSERT INTO documents VALUES (1, 'fixture', 'doc-hash', 1)"
+        )
+        connection.execute(
+            "INSERT INTO content_vectors VALUES ('doc-hash', 'model-id', 1)"
+        )
+        connection.execute("INSERT INTO vectors_vec_rowids VALUES ('doc-hash:0')")
+    args = SimpleNamespace(
+        qmd_index_db=database,
+        collection="fixture",
+        retrieval_model_id="model-id",
+    )
+
+    assert retrieval_benchmark_cli_mod._qmd_index_is_ready(args, config_payload)
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DELETE FROM vectors_vec_rowids")
+
+    assert not retrieval_benchmark_cli_mod._qmd_index_is_ready(
+        args, config_payload
+    )
 
 
 def test_qmd_package_hash_covers_imported_package_files(
@@ -222,6 +309,27 @@ def test_qmd_package_hash_covers_imported_package_files(
     before = retrieval_benchmark_cli_mod._qmd_package_sha256(str(script))
 
     imported.write_text("export const version = 2", encoding="utf-8")
+
+    assert retrieval_benchmark_cli_mod._qmd_package_sha256(str(script)) != before
+
+
+def test_qmd_package_hash_covers_sibling_native_dependencies(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    install = tmp_path / "qmd-install"
+    package = install / "node_modules" / "@tobilu" / "qmd"
+    script = package / "bin" / "qmd"
+    sibling = install / "node_modules" / "sqlite-vec" / "sqlite-vec.dll"
+    script.parent.mkdir(parents=True)
+    sibling.parent.mkdir(parents=True)
+    (install / "package.json").write_text('{"private":true}', encoding="utf-8")
+    (install / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (package / "package.json").write_text('{"name":"@tobilu/qmd"}', encoding="utf-8")
+    script.write_text("#!/usr/bin/env node", encoding="utf-8")
+    sibling.write_text("native-v1", encoding="utf-8")
+    before = retrieval_benchmark_cli_mod._qmd_package_sha256(str(script))
+
+    sibling.write_text("native-v2", encoding="utf-8")
 
     assert retrieval_benchmark_cli_mod._qmd_package_sha256(str(script)) != before
 
@@ -258,6 +366,17 @@ def test_directory_hash_rejects_file_disappearance(
             "required_groups": [],
             "irrelevant": None,
         },
+        {
+            "id": "q1",
+            "query": "question",
+            "required_groups": [[{
+                "evidence_id": "sha256:" + "a" * 64,
+                "path": "answer.md",
+                "text": "answer",
+                "grade": [],
+            }]],
+            "irrelevant": [],
+        },
     ],
 )
 def test_validate_records_rejects_malformed_judgments_without_type_error(
@@ -265,6 +384,22 @@ def test_validate_records_rejects_malformed_judgments_without_type_error(
 ):
     with pytest.raises(ValueError, match="Benchmark records are invalid"):
         retrieval_benchmark_cli_mod.validate_records([record])
+
+
+@pytest.mark.parametrize("field", ["split", "kind"])
+def test_private_workbook_rejects_unhashable_distribution_fields(
+    retrieval_benchmark_cli_mod, field
+):
+    record = {
+        "split": "development",
+        "kind": "positive",
+        "owner_authored": True,
+        "owner_adjudicated": True,
+    }
+    record[field] = []
+
+    with pytest.raises(ValueError, match="distribution"):
+        retrieval_benchmark_cli_mod.validate_private_workbook({"records": [record]})
 
 
 def test_cli_redacts_artifact_fingerprint_failure(
@@ -912,16 +1047,58 @@ def _public_qmd_args(tmp_path, corpus_root):
     model = artifact_root / "model.gguf"
     config = artifact_root / "fixture.yml"
     index_db = artifact_root / "index.sqlite"
+    config_payload = {
+        "collections": {"fixture": {"path": str(corpus_root), "pattern": "**/*.md"}},
+        "models": {
+            "embed": str(model.resolve()),
+            "generate": str(model.resolve()),
+            "rerank": str(model.resolve()),
+        },
+    }
     for path, content in (
         (node, "node"),
         (tokenizer, "tokenizer"),
         (model, "GGUF fixture"),
-        (config, "collections:\n  fixture:\n    path: .\n"),
+        (config, yaml.safe_dump(config_payload, sort_keys=False)),
     ):
         path.write_text(content, encoding="utf-8")
+    config_hash = hashlib.sha256(
+        json.dumps(
+            config_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
     with sqlite3.connect(index_db) as connection:
-        connection.execute("CREATE TABLE chunks (value TEXT)")
-        connection.execute("INSERT INTO chunks VALUES ('fixture')")
+        connection.executescript(
+            """
+            CREATE TABLE store_config (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY,
+                collection TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                active INTEGER NOT NULL
+            );
+            CREATE TABLE content_vectors (
+                hash TEXT NOT NULL,
+                model TEXT NOT NULL,
+                total_chunks INTEGER NOT NULL
+            );
+            CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
+            CREATE TABLE vectors_vec_rowids (id TEXT NOT NULL);
+            """
+        )
+        connection.execute(
+            "INSERT INTO store_config VALUES ('config_hash', ?)",
+            (config_hash,),
+        )
+        connection.execute(
+            "INSERT INTO documents VALUES (1, 'fixture', 'doc-hash', 1)"
+        )
+        connection.execute(
+            "INSERT INTO content_vectors VALUES ('doc-hash', 'fixture-model', 1)"
+        )
+        connection.execute("INSERT INTO vectors_vec_rowids VALUES ('doc-hash:0')")
     return [
         "--node-executable", str(node),
         "--qmd-script", str(script),
@@ -1065,6 +1242,60 @@ def test_cli_rejects_artifacts_changed_during_execution(
 
     assert error.value.code == 2
     assert "artifacts changed during execution" in capsys.readouterr().err
+
+
+def test_cli_rejects_corpus_changed_during_execution(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    queries = _public_queries()
+    corpus_root = _write_corpus(tmp_path)
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(
+        json.dumps(
+            _add_manifest(
+                {"schema_version": 1, "queries": queries},
+                queries,
+                retrieval_benchmark_mod,
+                {"public": [query["id"] for query in queries]},
+                corpus_root,
+            )
+        ),
+        encoding="utf-8",
+    )
+    changed = False
+
+    def run_process(_args, _environment):
+        nonlocal changed
+        if not changed:
+            (corpus_root / "new-distractor.md").write_text(
+                "New distractor.\n", encoding="utf-8"
+            )
+            changed = True
+        return {
+            "stdout": json.dumps({"results": [], "low_confidence": False}),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        }
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "grooveseek",
+                *_public_groove_args(tmp_path, corpus_root),
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=run_process,
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert "corpus changed during execution" in capsys.readouterr().err
 
 
 def test_public_cli_executes_queries_in_canonical_id_order(
@@ -1284,7 +1515,10 @@ def test_public_cli_runs_qmd_adapter(
                         "file": str(document),
                         "line": 1,
                         "snippet": "@@ -1,1 @@\nExact answer passage.",
-                        "explain": {"blendedScore": 1.0},
+                        "explain": {
+                            "blendedScore": 1.0,
+                            "vectorScores": [0.9],
+                        },
                     }
                 ]
             ),
@@ -1347,7 +1581,10 @@ def test_cli_redacts_qmd_out_of_corpus_path(
                     "file": str(private_path),
                     "line": 1,
                     "snippet": "private",
-                    "explain": {"blendedScore": 1.0},
+                    "explain": {
+                        "blendedScore": 1.0,
+                        "vectorScores": [0.9],
+                    },
                 }]),
                 "elapsed_ms": 1,
                 "peak_working_set_bytes": 1,

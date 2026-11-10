@@ -30,7 +30,8 @@ def _valid_judgment(passage: object, grades: set[str]) -> bool:
         and bool(passage["path"])
         and isinstance(passage.get("text"), str)
         and bool(passage["text"])
-        and passage.get("grade") in grades
+        and isinstance(passage.get("grade"), str)
+        and passage["grade"] in grades
     )
 
 
@@ -110,7 +111,7 @@ def _executable_sha256(value: str | None) -> str | None:
 def _sqlite_snapshot_sha256(path: Path | None) -> str | None:
     if path is None or not path.is_file():
         return None
-    uri = f"file:{path.resolve().as_posix()}?mode=ro"
+    uri = path.resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
         snapshot = connection.serialize()
     return "sha256:" + hashlib.sha256(snapshot).hexdigest()
@@ -127,6 +128,12 @@ def _qmd_package_sha256(value: str | None) -> str | None:
     if not value:
         return None
     script = Path(value).resolve()
+    for install_root in script.parents:
+        if (
+            (install_root / "package-lock.json").is_file()
+            and (install_root / "node_modules").is_dir()
+        ):
+            return _directory_sha256(install_root)
     for package_root in script.parents:
         if (package_root / "package.json").is_file():
             return _directory_sha256(package_root)
@@ -198,22 +205,109 @@ def _backend_settings_payload(args) -> dict:
     }
 
 
-def _qmd_config_uses_model_artifact(args) -> bool:
-    if args.qmd_config.name != f"{args.index}.yml":
-        return False
+def _read_qmd_config(args) -> dict:
     payload = yaml.safe_load(args.qmd_config.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
+        raise ValueError("QMD configuration must be a mapping")
+    return payload
+
+
+def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
+    if args.qmd_config.name != f"{args.index}.yml":
         return False
-    models = payload.get("models") or {}
+    if payload is None:
+        payload = _read_qmd_config(args)
+    models = payload.get("models")
     if not isinstance(models, dict):
         return False
+    if any(
+        not isinstance(models.get(name), str) or not models[name]
+        for name in ("embed", "generate", "rerank")
+    ):
+        return False
     configured = models.get("embed")
-    if configured is None:
-        return True
-    configured_path = Path(str(configured)).expanduser()
+    configured_path = Path(configured).expanduser()
     return (
         configured_path.is_absolute()
         and configured_path.resolve() == args.retrieval_model_artifact.resolve()
+    )
+
+
+def _qmd_index_is_ready(args, config_payload: dict) -> bool:
+    required_tables = {
+        "store_config",
+        "documents",
+        "content_vectors",
+        "vectors_vec",
+        "vectors_vec_rowids",
+    }
+    config_hash = hashlib.sha256(
+        json.dumps(
+            config_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    try:
+        uri = args.qmd_index_db.resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+                )
+            }
+            if not required_tables.issubset(tables):
+                return False
+            stored_hash = connection.execute(
+                "SELECT value FROM store_config WHERE key = 'config_hash'"
+            ).fetchone()
+            if stored_hash is None or stored_hash[0] != config_hash:
+                return False
+            active_documents = connection.execute(
+                "SELECT COUNT(*) FROM documents "
+                "WHERE collection = ? AND active = 1",
+                (args.collection,),
+            ).fetchone()[0]
+            covered_documents = connection.execute(
+                "SELECT COUNT(*) "
+                "FROM documents AS d "
+                "WHERE d.collection = ? AND d.active = 1 "
+                "AND EXISTS ("
+                "SELECT 1 FROM content_vectors AS cv "
+                "WHERE cv.hash = d.hash AND cv.model = ? "
+                "GROUP BY cv.hash, cv.model "
+                "HAVING COUNT(*) = MAX(cv.total_chunks) "
+                "AND MAX(cv.total_chunks) > 0"
+                ")",
+                (args.collection, args.retrieval_model_id),
+            ).fetchone()[0]
+            content_vector_rows = connection.execute(
+                "SELECT COUNT(*) "
+                "FROM content_vectors AS cv "
+                "WHERE cv.model = ? AND EXISTS ("
+                "SELECT 1 FROM documents AS d WHERE d.hash = cv.hash "
+                "AND d.collection = ? AND d.active = 1"
+                ")",
+                (args.retrieval_model_id, args.collection),
+            ).fetchone()[0]
+            vector_rows = connection.execute(
+                "SELECT COUNT(*) FROM vectors_vec_rowids AS vr WHERE EXISTS ("
+                "SELECT 1 FROM documents AS d "
+                "JOIN content_vectors AS cv ON cv.hash = d.hash "
+                "WHERE d.collection = ? AND d.active = 1 AND cv.model = ? "
+                "AND SUBSTR(vr.id, 1, LENGTH(d.hash)) = d.hash "
+                "AND SUBSTR(vr.id, LENGTH(d.hash) + 1, 1) IN ('_', ':')"
+                ")",
+                (args.collection, args.retrieval_model_id),
+            ).fetchone()[0]
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return False
+    return (
+        active_documents > 0
+        and covered_documents == active_documents
+        and content_vector_rows > 0
+        and vector_rows == content_vector_rows
     )
 
 
@@ -224,11 +318,16 @@ def validate_private_workbook(payload: dict) -> None:
         ("evaluation", "positive"): 15,
         ("evaluation", "negative"): 5,
     }
-    counts = Counter(
-        (record.get("split"), record.get("kind"))
-        for record in payload.get("records", [])
-    )
-    if len(payload.get("records", [])) != 60 or set(counts) != set(expected):
+    records = payload.get("records", [])
+    if not isinstance(records, list) or any(
+        not isinstance(record, dict)
+        or not isinstance(record.get("split"), str)
+        or not isinstance(record.get("kind"), str)
+        for record in records
+    ):
+        raise ValueError("Private benchmark distribution contains unexpected records")
+    counts = Counter((record["split"], record["kind"]) for record in records)
+    if len(records) != 60 or set(counts) != set(expected):
         raise ValueError("Private benchmark distribution contains unexpected records")
     missing = [
         f"{split} {kind} {counts[(split, kind)]}/{count}"
@@ -237,7 +336,6 @@ def validate_private_workbook(payload: dict) -> None:
     ]
     if missing:
         raise ValueError("Private benchmark distribution is incomplete: " + ", ".join(missing))
-    records = payload.get("records", [])
     unapproved_count = sum(
         record.get("owner_authored") is not True
         or record.get("owner_adjudicated") is not True
@@ -526,12 +624,20 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         )
     if args.backend == "qmd":
         try:
-            model_is_pinned = _qmd_config_uses_model_artifact(args)
-        except (OSError, UnicodeError, yaml.YAMLError):
+            qmd_config_payload = _read_qmd_config(args)
+            model_is_pinned = _qmd_config_uses_model_artifact(
+                args,
+                qmd_config_payload,
+            )
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError):
             parser.error("The QMD benchmark configuration is invalid")
         if not model_is_pinned:
             parser.error(
                 "The QMD configuration must use the pinned model artifact"
+            )
+        if not _qmd_index_is_ready(args, qmd_config_payload):
+            parser.error(
+                "The QMD benchmark index is not ready for pinned hybrid retrieval"
             )
     if any(
         not fingerprint
@@ -622,6 +728,14 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         )
     except (OSError, UnicodeError, ValueError):
         parser.error("Evidence verification failed for the benchmark corpus")
+    try:
+        final_corpus_hash = retrieval_benchmark.corpus_snapshot_hash(
+            args.benchmark_corpus_root
+        )
+    except (OSError, UnicodeError):
+        parser.error("Benchmark corpus could not be fingerprinted")
+    if final_corpus_hash != payload["manifest"]["corpus_snapshot_hash"]:
+        parser.error("Benchmark corpus changed during execution")
     summary = retrieval_benchmark.evaluate(queries, runs)
     report = {
         "schema_version": 1,

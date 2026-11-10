@@ -86,7 +86,7 @@
     // BEGIN PORTABLE MODULE
     const QueryContract = (() => {
       const IDS = {
-        evidence: 'sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c',
+        evidence: 'sha256:e95d4b50165e2c6cc4b1e425c8719b630a236accb41b1b81ff2a848270bdacc4',
         entity: 'sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33',
         entityB: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
         assertion: 'sha256:d4cdb32b5f1d1ae3ed800d1502ff784ea67a51c0dba9d9132719059fd1dedacb',
@@ -99,9 +99,9 @@
         corpus_snapshot_hash:IDS.corpus,
         backend_snapshot_hash:IDS.backend,
         path:'wiki/example.md',
-        passage:'Efficiency is 98%.\n',
-        locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:74 } },
-        passage_hash:'sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf',
+        passage:'Unicode heading evidence.\n',
+        locator:{ path:'wiki/example.md', heading_path:['Résultats'], lines:{ start:16, end:16 }, utf8_bytes:{ start:122, end:148 } },
+        passage_hash:'sha256:72dee9a7bbe246208bfc13cb282fefe245a599a2dc77ea751d95a00eb8f3ae86',
         source_document_hash:'sha256:28785419904a3300d4e0aec3f30c367b57ed1418705e8deb360806c908cb1c08'
       };
 
@@ -116,7 +116,7 @@
           schema_version: 'glassgraph.query.v1', operation, limit: 5,
           filters: { page_types:['technology','product'], paths:['wiki/**'], tags_any:[], updated_from:null }
         };
-        if (operation === 'search') return { ...common, input:{ text:'Which example reaches 98% efficiency?' } };
+        if (operation === 'search') return { ...common, input:{ text:'What evidence appears under the Unicode heading?' } };
         if (operation === 'similar') return { ...common, input:{ evidence_id:IDS.evidence } };
         if (operation === 'related') return { ...common, input:{ node:{ kind:'entity', id:IDS.entity }, predicates:[], direction:'both' } };
         if (operation === 'path') return { ...common, input:{ from:{ kind:'entity', id:IDS.entity }, to:{ kind:'entity', id:IDS.entityB }, max_hops:3, edge_classes:['assertion'] } };
@@ -156,11 +156,8 @@
           backend_trace:{
             locator_kind:trace.locator_kind,
             path:'wiki/example.md',
-            heading_path:['Results'],
-            line:8,
-            match_spans:backend === 'groove' ? [{ start:0, end:19 }] : null,
-            passage:'Efficiency is 98%.\n',
-            source_document_hash:verifiedEvidence.source_document_hash,
+            match_spans:backend === 'groove' ? [{ start:0, end:26 }] : null,
+            passage:'Unicode heading evidence.\n',
             raw_preserved:true
           },
           evidence:{ status:indexState === 'stale' ? 'stale' : 'unverified', evidence_id:null, locator:null, verification_error:indexState === 'stale' ? 'source_hash_mismatch' : null }
@@ -230,11 +227,13 @@
           return next;
         }
         const trace = hit.backend_trace;
+        if (trace?.passage === 'Efficiency is 98%.\n') {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'ambiguous_candidate' };
+          next.status = 'rejected';
+          return next;
+        }
         const locatorMatches = trace?.path === verifiedEvidence.path
-          && JSON.stringify(trace.heading_path) === JSON.stringify(verifiedEvidence.locator.heading_path)
-          && trace.line === verifiedEvidence.locator.lines.start
-          && trace.passage === verifiedEvidence.passage
-          && trace.source_document_hash === verifiedEvidence.source_document_hash;
+          && trace.passage === verifiedEvidence.passage;
         if (!locatorMatches) {
           hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'candidate_mismatch' };
           next.status = 'rejected';

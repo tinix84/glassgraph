@@ -292,6 +292,22 @@ def test_corpus_snapshot_hash_uses_platform_neutral_path_order(
     )
 
 
+def test_corpus_snapshot_hash_uses_exact_lowercase_markdown_extension(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "included.md").write_text("included\n", encoding="utf-8")
+    (tmp_path / "excluded.MD").write_text("excluded\n", encoding="utf-8")
+    expected = _identifier(
+        "glassgraph:benchmark-corpus:v1",
+        [{
+            "path": "included.md",
+            "sha256": "sha256:" + hashlib.sha256(b"included\n").hexdigest(),
+        }],
+    )
+
+    assert retrieval_benchmark_mod.corpus_snapshot_hash(tmp_path) == expected
+
+
 def test_public_fixture_forces_lf_checkout():
     attributes = (ROOT := FIXTURE.parents[3]) / ".gitattributes"
     assert "tests/fixtures/benchmark/v1/** text eol=lf" in attributes.read_text(

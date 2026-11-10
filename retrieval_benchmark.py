@@ -155,7 +155,11 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
             ).hexdigest(),
         }
         for path in sorted(
-            root.rglob("*.md"),
+            (
+                item
+                for item in root.rglob("*")
+                if item.is_file() and item.suffix == ".md"
+            ),
             key=lambda item: item.relative_to(root).as_posix(),
         )
     ]
@@ -174,6 +178,18 @@ def _canonical_document_path(value: str) -> str:
     if re.match(r"^[A-Za-z]:", canonical):
         raise ValueError("Evidence judgment path is outside the corpus")
     return canonical
+
+
+def _lf_lines(text: str):
+    """Yield lines split only at the normalized Markdown LF delimiter."""
+    start = 0
+    while start < len(text):
+        end = text.find("\n", start)
+        if end < 0:
+            yield text[start:]
+            return
+        yield text[start : end + 1]
+        start = end + 1
 
 
 def _heading_instances(text: str, document_id: str) -> list[dict]:
@@ -207,7 +223,7 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     fence = None
     html_block = None
     paragraph_open = False
-    for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
+    for line_number, line in enumerate(_lf_lines(text), start=1):
         source_line = line.rstrip("\n")
         if offset < frontmatter_end:
             paragraph_open = False
@@ -294,27 +310,22 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     return headings
 
 
-def _normalization_segments(content: str) -> list[tuple[str, str]]:
-    segments = []
-    current = ""
-    for character in content:
-        interacts = (
-            bool(current)
-            and (
-                unicodedata.combining(character) != 0
-                or unicodedata.normalize("NFC", current + character)
-                != unicodedata.normalize("NFC", current)
-                + unicodedata.normalize("NFC", character)
-            )
-        )
-        if current and not interacts:
-            segments.append((current, unicodedata.normalize("NFC", current)))
-            current = character
-        else:
-            current += character
-    if current:
-        segments.append((current, unicodedata.normalize("NFC", current)))
-    return segments
+def _physical_lines(text: str):
+    """Yield source lines split only at CR, LF, or CRLF delimiters."""
+    start = 0
+    index = 0
+    while index < len(text):
+        if text[index] not in "\r\n":
+            index += 1
+            continue
+        end = index + 1
+        if text[index] == "\r" and end < len(text) and text[end] == "\n":
+            end += 1
+        yield text[start:index], text[index:end]
+        start = end
+        index = end
+    if start < len(text):
+        yield text[start:], ""
 
 
 def _original_utf8_byte_offset(
@@ -323,37 +334,25 @@ def _original_utf8_byte_offset(
 ) -> int:
     normalized_cursor = 0
     byte_cursor = 0
-    for original_line in original_text.splitlines(keepends=True):
-        if original_line.endswith("\r\n"):
-            content, ending = original_line[:-2], "\r\n"
-        elif original_line.endswith(("\r", "\n")):
-            content, ending = original_line[:-1], original_line[-1]
-        else:
-            content, ending = original_line, ""
+    for content, ending in _physical_lines(original_text):
+        original_line = content + ending
         normalized_content = unicodedata.normalize("NFC", content)
         content_end = normalized_cursor + len(normalized_content)
         if normalized_offset <= content_end:
             column = normalized_offset - normalized_cursor
-            if not content and column == 0:
-                return byte_cursor
-            normalized_column = 0
-            original_byte_column = 0
-            for original_segment, normalized_segment in _normalization_segments(content):
-                next_normalized = normalized_column + len(normalized_segment)
-                next_original = original_byte_column + len(
-                    original_segment.encode("utf-8")
-                )
-                if column == normalized_column:
-                    return byte_cursor + original_byte_column
-                if column == next_normalized:
-                    return byte_cursor + next_original
-                if normalized_column < column < next_normalized:
-                    raise ValueError(
-                        "Normalized evidence coordinate has no exact source interval"
-                    )
-                normalized_column = next_normalized
-                original_byte_column = next_original
-            raise ValueError("Normalized evidence coordinate has no source byte boundary")
+            target_prefix = normalized_content[:column]
+            target_suffix = normalized_content[column:]
+            boundaries = [
+                index
+                for index in range(len(content) + 1)
+                if unicodedata.normalize("NFC", content[:index]) == target_prefix
+                and unicodedata.normalize("NFC", content[index:]) == target_suffix
+            ]
+            if len(boundaries) == 1:
+                return byte_cursor + len(content[: boundaries[0]].encode("utf-8"))
+            raise ValueError(
+                "Normalized evidence coordinate has no exact source interval"
+            )
         normalized_cursor = content_end
         if ending:
             normalized_cursor += 1
@@ -742,19 +741,31 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
                 for group in groups
             )
             recalls.append(satisfied / len(groups))
-        expected_paths = {passage["path"] for group in groups for passage in group}
+        expected_paths = {
+            _canonical_document_path(passage["path"])
+            for group in groups
+            for passage in group
+        }
+
+        def hit_path(hit: dict) -> str | None:
+            try:
+                value = hit.get("path")
+                return _canonical_document_path(value) if isinstance(value, str) else None
+            except ValueError:
+                return None
+
         first_relevant_rank = next(
             (
                 rank
                 for rank, hit in enumerate(raw_hits, start=1)
-                if hit.get("path") in expected_paths
+                if hit_path(hit) in expected_paths
             ),
             None,
         )
         reciprocal_ranks.append(1 / first_relevant_rank if first_relevant_rank else 0.0)
         ndcgs.append(_ndcg_at_10(groups, raw_hits))
         path_relevant_hits += sum(
-            hit.get("path") in expected_paths for hit in raw_hits[:10]
+            hit_path(hit) in expected_paths for hit in raw_hits[:10]
         )
         exact_evidence_hits += sum(
             any(

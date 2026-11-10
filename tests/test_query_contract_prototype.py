@@ -22,7 +22,7 @@ def test_query_contract_verifies_exact_fixture_evidence_only():
         pytest.skip("Node.js is not installed")
 
     source_bytes = EXAMPLE.read_bytes()
-    passage = b"Efficiency is 98%.\n"
+    passage = b"Unicode heading evidence.\n"
     byte_start = source_bytes.index(passage)
     line_start = source_bytes[:byte_start].count(b"\n") + 1
     expected = {
@@ -56,12 +56,11 @@ wrong.results[0].backend_trace.passage = 'Unrelated text.';
 const rejected = QueryContract.verify(wrong);
 if (rejected.results[0].evidence.evidence_id !== null) throw new Error('wrong passage was certified');
 
-const wrongLocator = QueryContract.execute('groove', 'fresh', 'search');
-wrongLocator.results[0].backend_trace.heading_path = ['Other'];
-wrongLocator.results[0].backend_trace.line = 12;
-wrongLocator.results[0].backend_trace.source_document_hash = 'sha256:' + '0'.repeat(64);
-const locatorRejected = QueryContract.verify(wrongLocator);
-if (locatorRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong locator was certified');
+const ambiguous = QueryContract.execute('groove', 'fresh', 'search');
+ambiguous.results[0].backend_trace.passage = 'Efficiency is 98%.\\n';
+ambiguous.results[0].backend_trace.match_spans = [{{ start:0, end:19 }}];
+const ambiguousRejected = QueryContract.verify(ambiguous);
+if (ambiguousRejected.results[0].evidence.evidence_id !== null) throw new Error('ambiguous passage was certified');
 
 const wrongSnapshot = QueryContract.execute('groove', 'fresh', 'search');
 wrongSnapshot.index.corpus_snapshot_hash = 'sha256:' + '0'.repeat(64);

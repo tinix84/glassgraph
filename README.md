@@ -94,7 +94,11 @@ Development runs can tune settings. Each report records a settings hash derived 
 
 GrooveSeek runs pass the pinned model with `--model`. They also set `FASTEMBED_CACHE_DIR` to the fingerprinted model-cache directory. This overrides an embedding provider in the GrooveSeek configuration.
 
-QMD runs require `--qmd-config <index-name>.yml` and `--qmd-index-db <index.sqlite>`. The runner pins `INDEX_PATH` and `QMD_CONFIG_DIR`. It passes the fingerprinted model file as `QMD_EMBED_MODEL`. If the QMD configuration declares `models.embed`, that value must be the same absolute model-file path.
+QMD runs require `--qmd-config <index-name>.yml` and `--qmd-index-db <index.sqlite>`. The configuration must define `models.embed`, `models.generate`, and `models.rerank`.
+
+The embed value must be the same absolute path as the fingerprinted model file. The runner verifies the stored configuration hash before retrieval. It also verifies vector coverage for each active document in the selected collection.
+
+The runner pins `INDEX_PATH`, `QMD_CONFIG_DIR`, and `QMD_EMBED_MODEL`. It clears ambient QMD query settings. Each query must return a vector-score trace. This trace proves that hybrid retrieval ran.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 

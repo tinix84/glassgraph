@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import tempfile
@@ -9,6 +10,25 @@ import time
 from pathlib import Path
 
 import psutil
+
+
+def _finite_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _valid_match_span(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("start"), int)
+        and not isinstance(value["start"], bool)
+        and isinstance(value.get("end"), int)
+        and not isinstance(value["end"], bool)
+        and 0 <= value["start"] <= value["end"]
+    )
 
 
 def _with_prefix(path: str, prefix: str | None) -> str:
@@ -96,7 +116,9 @@ class GrooveSeekAdapter:
         self.path_prefix = path_prefix
         self.config = str(config) if config is not None else None
         self.model = model
-        self.model_cache = str(model_cache) if model_cache is not None else None
+        self.model_cache = (
+            str(Path(model_cache).resolve()) if model_cache is not None else None
+        )
 
     def query(self, text: str, *, limit: int) -> dict:
         command = [
@@ -126,12 +148,25 @@ class GrooveSeekAdapter:
         if (
             not isinstance(payload, dict)
             or not isinstance(payload.get("results"), list)
-            or any(not isinstance(hit, dict) for hit in payload["results"])
+            or not isinstance(payload.get("low_confidence"), bool)
+            or any(
+                not isinstance(hit, dict)
+                or not isinstance(hit.get("path"), str)
+                or not hit["path"]
+                or not isinstance(hit.get("content"), str)
+                or not _finite_number(hit.get("score"))
+                or not isinstance(hit.get("match_spans", []), list)
+                or any(
+                    not _valid_match_span(span)
+                    for span in hit.get("match_spans", [])
+                )
+                for hit in payload["results"]
+            )
         ):
             raise RuntimeError("GrooveSeek returned an invalid response")
         raw_hits = []
         for hit in payload.get("results", []):
-            content = str(hit.get("content") or "")
+            content = hit["content"]
             raw_hits.append(
                 {
                     "path": _with_prefix(str(hit.get("path") or ""), self.path_prefix),
@@ -218,7 +253,14 @@ class QmdAdapter:
             "--full-path",
             "--explain",
         ]
-        environment = {"QMD_FORCE_CPU": "1"}
+        environment = {
+            "QMD_FORCE_CPU": "1",
+            "QMD_EMBED_CONTEXT_SIZE": None,
+            "QMD_EMBED_PARALLELISM": None,
+            "QMD_EXPAND_CONTEXT_SIZE": None,
+            "QMD_LLAMA_GPU": None,
+            "QMD_RERANK_CONTEXT_SIZE": None,
+        }
         if self.index_db is not None:
             environment.update(
                 {
@@ -232,14 +274,16 @@ class QmdAdapter:
         measured = self.process_runner(command, environment)
         payload = json.loads(measured["stdout"])
         if not isinstance(payload, list) or any(
-            not isinstance(hit, dict) for hit in payload
+            not isinstance(hit, dict)
+            or not isinstance(hit.get("file"), str)
+            or not hit["file"]
+            for hit in payload
         ):
             raise RuntimeError("QMD returned an invalid response")
-        raw_hits = []
+        relative_paths = []
         for hit in payload:
-            content = str(hit.get("snippet") or "")
             try:
-                relative_path = (
+                relative_paths.append(
                     Path(hit["file"])
                     .resolve()
                     .relative_to(self.corpus_root)
@@ -249,6 +293,31 @@ class QmdAdapter:
                 raise RuntimeError(
                     "QMD returned a result outside the benchmark corpus"
                 ) from None
+        if any(
+            not isinstance(hit.get("snippet"), str)
+            or not _finite_number(hit.get("score"))
+            or not isinstance(hit.get("line"), int)
+            or isinstance(hit["line"], bool)
+            or hit["line"] <= 0
+            or not isinstance(hit.get("explain"), dict)
+            or (
+                "vectorScores" in hit["explain"]
+                and (
+                    not isinstance(hit["explain"]["vectorScores"], list)
+                    or any(
+                        not _finite_number(score)
+                        for score in hit["explain"]["vectorScores"]
+                    )
+                )
+            )
+            for hit in payload
+        ):
+            raise RuntimeError("QMD returned an invalid response")
+        if not any(hit["explain"].get("vectorScores") for hit in payload):
+            raise RuntimeError("QMD did not prove vector retrieval")
+        raw_hits = []
+        for hit, relative_path in zip(payload, relative_paths, strict=True):
+            content = hit["snippet"]
             path = _with_prefix(relative_path, self.path_prefix)
             raw_hits.append(
                 {

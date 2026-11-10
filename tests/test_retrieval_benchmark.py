@@ -139,6 +139,37 @@ def test_evaluate_reports_exact_evidence_span_accuracy(retrieval_benchmark_mod):
     assert report["evidence_span_accuracy"] == 0.5
 
 
+def test_evaluate_canonicalizes_paths_for_document_metrics(
+    retrieval_benchmark_mod,
+):
+    queries = [{
+        "id": "q1",
+        "required_groups": [
+            [{
+                "evidence_id": "e-a",
+                "path": "./answer.md",
+                "text": "First answer",
+                "grade": "direct",
+            }],
+            [{
+                "evidence_id": "e-b",
+                "path": "answer.md",
+                "text": "Second answer",
+                "grade": "direct",
+            }],
+        ],
+    }]
+    runs = {"q1": {"hits": [
+        {"evidence_ids": ["e-a"], "path": "answer.md", "text": "First answer"},
+        {"evidence_ids": ["e-b"], "path": "answer.md", "text": "Second answer"},
+    ]}}
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["mrr"] == 1.0
+    assert report["evidence_span_accuracy"] == 1.0
+
+
 def test_evaluate_counts_each_verified_alternative_span(
     retrieval_benchmark_mod,
 ):
@@ -708,6 +739,37 @@ def test_derive_evidence_rejects_inexact_reordered_combining_boundary(
             tmp_path,
             {"path": "answer.md", "text": "à"},
         )
+
+
+def test_derive_evidence_accepts_exact_boundary_in_nfc_stable_sequence(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text("x\u0338\n", encoding="utf-8")
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "x"},
+    )
+
+    assert records[0]["utf8_byte_start"] == 0
+    assert records[0]["utf8_byte_end"] == 1
+
+
+def test_unicode_line_separator_does_not_create_markdown_heading(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "Body\u2028# Not a heading\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading"] == ""
+    assert records[0]["line_start"] == 2
 
 
 def test_derive_evidence_rejects_non_markdown_document(
