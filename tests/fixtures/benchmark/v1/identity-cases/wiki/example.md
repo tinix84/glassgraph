@@ -3,8 +3,6 @@ type: product
 vendor: "[[Tesla]]"
 ---
 
-# Example
-
 ## Results
 
 Efficiency is 98%.

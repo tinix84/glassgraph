@@ -37,7 +37,8 @@
 <body>
   <header>
     <h1>Glassgraph backend-neutral query contract</h1>
-    <p><strong>Question:</strong> what is the smallest stable JSON state model for <code>search</code>, <code>similar</code>, <code>related</code>, <code>path</code>, and <code>explain</code> that preserves raw backend traces while emitting only compiler-verified evidence IDs?</p>
+    <p><strong>Question:</strong> Which stable JSON state model supports <code>search</code>, <code>similar</code>, <code>related</code>, <code>path</code>, and <code>explain</code>?</p>
+    <p>The model must preserve raw backend traces. It emits an evidence ID only after compiler verification.</p>
     <div class="warning">THROWAWAY PROTOTYPE — public synthetic data only. This is not a backend decision or production API.</div>
   </header>
   <main>
@@ -88,10 +89,18 @@
         evidence: 'sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c',
         entity: 'sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33',
         entityB: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
-        assertion: 'sha256:4661ffcdae95024490714d5f3b9d18435d0689166bf767e59ea5061b89c6e626',
+        assertion: 'sha256:d4cdb32b5f1d1ae3ed800d1502ff784ea67a51c0dba9d9132719059fd1dedacb',
         predicate: 'sha256:c4fe157c9cd173e63c5e0f92ca20e8094a133e170cd385fd86263a3bac6bd9b6',
         corpus: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         backend: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+      };
+
+      const verifiedEvidence = {
+        path:'wiki/example.md',
+        passage:'Efficiency is 98%.',
+        locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:73 } },
+        passage_hash:'sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf',
+        source_document_hash:'sha256:28785419904a3300d4e0aec3f30c367b57ed1418705e8deb360806c908cb1c08'
       };
 
       const capabilities = {
@@ -147,7 +156,7 @@
         };
       }
 
-      function graphResult(operation) {
+      function graphResult(operation, indexState) {
         if (operation === 'related') {
           return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, predicate_id:IDS.predicate, evidence_ids:[IDS.evidence] }, score:null };
         }
@@ -160,9 +169,9 @@
         }
         return { result_id:'result:1', kind:'explanation', rank:1, trace:[
           { stage:'backend_candidate', detail:'Raw adapter score and locator preserved.' },
-          { stage:'compiler_verification', detail:'Exact passage and source hash checked against the evidence table.' },
+          { stage:'compiler_verification', detail:indexState === 'fresh' ? 'Exact passage and source hash checked against the evidence table.' : 'Verification refused because the index is stale.' },
           { stage:'contract_result', detail:'Evidence ID emitted only after verification.' }
-        ], evidence_ids:[IDS.evidence], score:null };
+        ], evidence_ids:indexState === 'fresh' ? [IDS.evidence] : [], score:null };
       }
 
       function execute(backend, indexState, operation) {
@@ -177,7 +186,7 @@
           return response;
         }
         if (operation === 'search' || operation === 'similar') response.results = [candidateResult(backend, indexState)];
-        else response.results = [graphResult(operation)];
+        else response.results = [graphResult(operation,indexState)];
         if (indexState === 'stale') response.warnings.push({ code:'stale_index', message:'Results cannot gain new evidence IDs until the derived index matches the Markdown snapshot.' });
         return response;
       }
@@ -195,12 +204,17 @@
           next.status = 'stale';
           return next;
         }
+        if (hit.backend_trace?.path !== verifiedEvidence.path || hit.backend_trace?.passage !== verifiedEvidence.passage) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'candidate_mismatch' };
+          next.status = 'rejected';
+          return next;
+        }
         hit.kind = 'evidence_hit';
         hit.evidence = {
           status:'verified', evidence_id:IDS.evidence,
-          locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:3, end:3 }, utf8_bytes:{ start:31, end:50 } },
-          passage_hash:'sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf',
-          source_document_hash:'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+          locator:verifiedEvidence.locator,
+          passage_hash:verifiedEvidence.passage_hash,
+          source_document_hash:verifiedEvidence.source_document_hash,
           verification_error:null
         };
         return next;
@@ -245,9 +259,9 @@
     const scenarios = [
       { id:'verified', title:'Verified evidence', description:'A backend candidate does not carry an evidence ID until the compiler verifies its exact passage and source hash.', steps:[['RUN','Run GrooveSeek search'],['VERIFY','Verify top candidate'],['EXPLAIN','Attach explanation']] },
       { id:'stale', title:'Stale index', description:'A stale derived index must retain the raw hit but refuse a new evidence ID.', setup:[['SET_INDEX','stale']], steps:[['RUN','Run with stale index'],['VERIFY','Attempt verification']] },
-      { id:'fallback', title:'Model-free refusal', description:'The model-free lane reports unsupported semantic similarity instead of silently changing its meaning.', setup:[['SET_BACKEND','fallback'],['SET_OPERATION','similar']], steps:[['RUN','Run unsupported similar request']] },
+      { id:'fallback', title:'Model-free refusal', description:'The model-free lane reports unsupported semantic similarity. It does not silently change the operation.', setup:[['SET_BACKEND','fallback'],['SET_OPERATION','similar']], steps:[['RUN','Run unsupported similar request']] },
       { id:'typed-path', title:'Typed path', description:'Graph paths preserve typed nodes, assertion edges, predicate IDs, direction, and supporting evidence IDs.', setup:[['SET_OPERATION','path']], steps:[['RUN','Run typed path request'],['EXPLAIN','Attach graph provenance']] },
-      { id:'qmd', title:'QMD locator', description:'QMD may return a heuristic line rather than a byte span; the same compiler verification transition produces the canonical locator.', setup:[['SET_BACKEND','qmd']], steps:[['RUN','Run QMD search'],['VERIFY','Verify against Markdown']] }
+      { id:'qmd', title:'QMD locator', description:'QMD can return a heuristic line instead of a byte span. Compiler verification produces the canonical locator.', setup:[['SET_BACKEND','qmd']], steps:[['RUN','Run QMD search'],['VERIFY','Verify against Markdown']] }
     ];
 
     function dispatch(action) { state = QueryContract.reduce(state, action); render(); }

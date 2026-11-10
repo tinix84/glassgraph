@@ -49,7 +49,7 @@ def run_process(args: list[str], environment: dict[str, str]) -> dict:
         stdout = stdout_file.read().decode("utf-8", errors="replace")
         stderr = stderr_file.read().decode("utf-8", errors="replace")
     if process.returncode:
-        raise RuntimeError(f"backend command failed with exit code {process.returncode}: {stderr}")
+        raise RuntimeError(f"backend command failed with exit code {process.returncode}")
     return {
         "stdout": stdout,
         "stderr": stderr,

@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from tokenizers import Tokenizer
 
 import retrieval_backends
 import retrieval_benchmark
+
+
+SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def load_token_counter(path: Path):
@@ -40,17 +45,108 @@ def validate_private_workbook(payload: dict) -> None:
     ]
     if missing:
         raise ValueError("Private benchmark distribution is incomplete: " + ", ".join(missing))
-    unapproved = [
-        record.get("id", "<missing-id>")
-        for record in payload.get("records", [])
-        if record.get("owner_authored") is not True
+    records = payload.get("records", [])
+    record_ids = [record.get("id") for record in records]
+    if any(not isinstance(record_id, str) or not record_id for record_id in record_ids):
+        raise ValueError("Every private benchmark record needs a nonempty ID")
+    if len(set(record_ids)) != len(record_ids):
+        raise ValueError("Private benchmark record IDs must be unique")
+    unapproved_count = sum(
+        record.get("owner_authored") is not True
         or record.get("owner_adjudicated") is not True
-    ]
-    if unapproved:
+        for record in records
+    )
+    if unapproved_count:
         raise ValueError(
             "Private benchmark records need owner authorship and adjudication: "
-            + ", ".join(unapproved)
+            f"{unapproved_count} invalid record(s)"
         )
+    invalid_judgments = 0
+    for record in records:
+        groups = record.get("required_groups")
+        if record.get("kind") == "positive":
+            valid = (
+                isinstance(groups, list)
+                and bool(groups)
+                and all(isinstance(group, list) and bool(group) for group in groups)
+                and all(
+                    isinstance(passage, dict)
+                    and passage.get("evidence_id")
+                    and passage.get("path")
+                    and passage.get("text")
+                    and passage.get("grade") in {"direct", "supporting"}
+                    for group in groups
+                    for passage in group
+                )
+            )
+        else:
+            valid = groups == [] and bool(record.get("adjudication_note"))
+        invalid_judgments += not valid
+    if invalid_judgments:
+        raise ValueError(
+            "Private benchmark judgments are invalid: "
+            f"{invalid_judgments} invalid record(s)"
+        )
+
+
+def validate_records(records: list[dict]) -> None:
+    record_ids = [record.get("id") for record in records]
+    if any(not isinstance(record_id, str) or not record_id for record_id in record_ids):
+        raise ValueError("Every benchmark record needs a nonempty ID")
+    if len(set(record_ids)) != len(record_ids):
+        raise ValueError("Benchmark record IDs must be unique")
+    invalid_records = 0
+    for record in records:
+        groups = record.get("required_groups")
+        valid = (
+            isinstance(record.get("query"), str)
+            and bool(record["query"].strip())
+            and isinstance(groups, list)
+            and all(isinstance(group, list) and bool(group) for group in groups)
+            and all(
+                isinstance(passage, dict)
+                and SHA256_PATTERN.fullmatch(str(passage.get("evidence_id") or ""))
+                and passage.get("path")
+                and passage.get("text")
+                and passage.get("grade") in {"direct", "supporting"}
+                for group in groups
+                for passage in group
+            )
+        )
+        invalid_records += not valid
+    if invalid_records:
+        raise ValueError(
+            f"Benchmark records are invalid: {invalid_records} invalid record(s)"
+        )
+
+
+def validate_manifest(payload: dict, records: list[dict], privacy: str) -> None:
+    manifest = payload.get("manifest")
+    if not isinstance(manifest, dict):
+        raise ValueError("The benchmark manifest is missing")
+    if manifest.get("schema_version") != payload.get("schema_version"):
+        raise ValueError("The benchmark manifest schema version does not match")
+    if not SHA256_PATTERN.fullmatch(str(manifest.get("corpus_snapshot_hash") or "")):
+        raise ValueError("The benchmark corpus snapshot hash is invalid")
+    if manifest.get("query_set_hash") != retrieval_benchmark.query_set_hash(records):
+        raise ValueError("The benchmark query-set hash does not match")
+    if manifest.get("judgment_set_hash") != retrieval_benchmark.judgment_set_hash(records):
+        raise ValueError("The benchmark judgment-set hash does not match")
+    membership = manifest.get("split_membership")
+    expected_membership = (
+        {
+            split: [record["id"] for record in records if record.get("split") == split]
+            for split in ("development", "evaluation")
+        }
+        if privacy == "private"
+        else {"public": [record["id"] for record in records]}
+    )
+    if membership != expected_membership:
+        raise ValueError("The benchmark split membership does not match")
+    try:
+        date.fromisoformat(str(manifest.get("adjudication_date") or ""))
+    except ValueError as error:
+        raise ValueError("The benchmark adjudication date is invalid")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,27 +166,64 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--path-prefix")
+    parser.add_argument("--setup-time-ms", type=float, required=True)
+    parser.add_argument("--full-build-time-ms", type=float, required=True)
+    parser.add_argument("--no-change-update-ms", type=float, required=True)
+    parser.add_argument("--one-file-update-ms", type=float, required=True)
+    parser.add_argument("--derived-index-size-bytes", type=int, required=True)
+    parser.add_argument("--offline-verified", action="store_true", required=True)
     return parser
 
 
 def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    measurements = (
+        args.setup_time_ms,
+        args.full_build_time_ms,
+        args.no_change_update_ms,
+        args.one_file_update_ms,
+    )
+    if any(value < 0 for value in measurements) or args.derived_index_size_bytes <= 0:
+        parser.error("Benchmark measurements must be nonnegative and index size must be positive")
+    if args.limit <= 0:
+        parser.error("The result limit must be positive")
+    if args.privacy == "private":
+        if args.split is None or args.output is None:
+            parser.error("Private benchmarks require --split and --output")
+        if args.queries.resolve() == args.output.resolve():
+            parser.error("The private report path must differ from the workbook path")
+        if args.output.exists():
+            parser.error("The private report path already exists")
+    if token_counter is None and args.tokenizer is None:
+        parser.error("Production benchmark runs require --tokenizer")
     if process_runner is None:
         process_runner = retrieval_backends.run_process
     if token_counter is None:
         token_counter = load_token_counter(args.tokenizer)
     payload = json.loads(args.queries.read_text(encoding="utf-8"))
-    if args.privacy == "private":
-        try:
+    try:
+        if args.privacy == "private":
             validate_private_workbook(payload)
-        except ValueError as error:
-            parser.error(str(error))
+            records = payload.get("records", [])
+        else:
+            records = payload.get("queries", [])
+        validate_records(records)
+        validate_manifest(payload, records, args.privacy)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.privacy == "private":
         queries = [
-            record for record in payload["records"] if record.get("split") == args.split
+            record for record in records if record.get("split") == args.split
         ]
     else:
-        queries = payload["queries"]
+        queries = records
+        positive_count = sum(bool(query.get("required_groups")) for query in queries)
+        negative_count = len(queries) - positive_count
+        if positive_count < 5 or negative_count < 5:
+            parser.error(
+                "Public reports require at least five positive and five negative queries"
+            )
 
     if args.backend == "grooveseek":
         adapter = retrieval_backends.GrooveSeekAdapter(
@@ -123,11 +256,21 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         "privacy": args.privacy,
         "split": args.split,
         "query_count": len(queries),
+        "manifest": payload["manifest"],
+        "measurements": {
+            "setup_time_ms": args.setup_time_ms,
+            "full_build_time_ms": args.full_build_time_ms,
+            "no_change_update_ms": args.no_change_update_ms,
+            "one_file_update_ms": args.one_file_update_ms,
+            "derived_index_size_bytes": args.derived_index_size_bytes,
+            "offline_verified": args.offline_verified,
+        },
         "summary": summary,
     }
     serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
     if args.privacy == "private":
-        args.output.write_text(serialized + "\n", encoding="utf-8")
+        with args.output.open("x", encoding="utf-8", newline="\n") as output_file:
+            output_file.write(serialized + "\n")
     else:
         print(serialized)
     return 0

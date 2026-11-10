@@ -10,11 +10,11 @@ def test_evaluate_counts_interchangeable_passages_once(retrieval_benchmark_mod):
             "id": "q1",
             "required_groups": [
                 [
-                    {"path": "a.md", "text": "Direct passage A", "grade": "direct"},
-                    {"path": "b.md", "text": "Direct passage B", "grade": "direct"},
+                    {"evidence_id": "e-a", "path": "a.md", "text": "Direct passage A", "grade": "direct"},
+                    {"evidence_id": "e-b", "path": "b.md", "text": "Direct passage B", "grade": "direct"},
                 ],
                 [
-                    {"path": "c.md", "text": "Supporting passage", "grade": "supporting"},
+                    {"evidence_id": "e-c", "path": "c.md", "text": "Supporting passage", "grade": "supporting"},
                 ],
             ],
         }
@@ -39,8 +39,8 @@ def test_evaluate_uses_graded_relevance_for_ndcg_at_10(retrieval_benchmark_mod):
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "direct.md", "text": "Direct", "grade": "direct"}],
-                [{"path": "support.md", "text": "Supporting", "grade": "supporting"}],
+                [{"evidence_id": "e-direct", "path": "direct.md", "text": "Direct", "grade": "direct"}],
+                [{"evidence_id": "e-support", "path": "support.md", "text": "Supporting", "grade": "supporting"}],
             ],
         }
     ]
@@ -95,7 +95,7 @@ def test_evaluate_reports_group_recall_at_10_and_mrr(retrieval_benchmark_mod):
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "answer.md", "text": "Answer", "grade": "direct"}],
+                [{"evidence_id": "e-answer", "path": "answer.md", "text": "Answer", "grade": "direct"}],
             ],
         }
     ]
@@ -121,7 +121,7 @@ def test_evaluate_reports_exact_evidence_span_accuracy(retrieval_benchmark_mod):
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "answer.md", "text": "Exact passage", "grade": "direct"}],
+                [{"evidence_id": "e-answer", "path": "answer.md", "text": "Exact passage", "grade": "direct"}],
             ],
         }
     ]
@@ -147,13 +147,13 @@ def test_evaluate_reports_context_and_explanation_density(retrieval_benchmark_mo
     runs = {
         "n1": {
             "hits": [
-                {"path": "a.md", "text": "A", "context_tokens": 10, "explanation": {"kind": "span"}},
+                {"path": "a.md", "text": "A", "context_tokens": 10, "explanation": {"kind": "span", "value": [1]}},
                 {"path": "b.md", "text": "B", "context_tokens": 20, "explanation": None},
             ]
         },
         "n2": {
             "hits": [
-                {"path": "c.md", "text": "C", "context_tokens": 30, "explanation": {"kind": "score"}},
+                {"path": "c.md", "text": "C", "context_tokens": 30, "explanation": {"kind": "score", "value": {"score": 1}}},
             ]
         },
     }
@@ -169,7 +169,7 @@ def test_evaluate_finds_exact_passage_inside_returned_chunk(retrieval_benchmark_
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "answer.md", "text": "Exact passage.", "grade": "direct"}],
+                [{"evidence_id": "e-answer", "path": "answer.md", "text": "Exact passage.", "grade": "direct"}],
             ],
         }
     ]
@@ -216,7 +216,7 @@ def test_evaluate_scores_positive_retrieval_before_confidence_abstention(
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "answer.md", "text": "Exact answer.", "grade": "direct"}]
+                [{"evidence_id": "e-answer", "path": "answer.md", "text": "Exact answer.", "grade": "direct"}]
             ],
         }
     ]
@@ -239,7 +239,7 @@ def test_evaluate_mrr_uses_first_relevant_document_path(retrieval_benchmark_mod)
         {
             "id": "q1",
             "required_groups": [
-                [{"path": "answer.md", "text": "Exact answer.", "grade": "direct"}]
+                [{"evidence_id": "e-answer", "path": "answer.md", "text": "Exact answer.", "grade": "direct"}]
             ],
         }
     ]
@@ -256,3 +256,79 @@ def test_evaluate_mrr_uses_first_relevant_document_path(retrieval_benchmark_mod)
 
     assert report["mrr"] == 1.0
     assert report["evidence_span_accuracy"] == 0.5
+
+
+def test_evaluate_rejects_wrong_explicit_evidence_id(retrieval_benchmark_mod):
+    queries = [
+        {
+            "id": "q1",
+            "required_groups": [[{
+                "evidence_id": "expected-id",
+                "path": "answer.md",
+                "text": "Repeated answer.",
+                "grade": "direct",
+            }]],
+        }
+    ]
+    runs = {
+        "q1": {
+            "hits": [{
+                "evidence_id": "different-id",
+                "path": "answer.md",
+                "text": "Repeated answer.",
+            }]
+        }
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["group_recall_at_5"] == 0.0
+    assert report["evidence_span_accuracy"] == 0.0
+
+
+def test_evaluate_rejects_ambiguous_unverified_duplicate_passage(
+    retrieval_benchmark_mod,
+):
+    queries = [
+        {
+            "id": "q1",
+            "required_groups": [[
+                {
+                    "evidence_id": "first-id",
+                    "path": "answer.md",
+                    "text": "Repeated answer.",
+                    "grade": "direct",
+                },
+                {
+                    "evidence_id": "second-id",
+                    "path": "answer.md",
+                    "text": "Repeated answer.",
+                    "grade": "direct",
+                },
+            ]],
+        }
+    ]
+    runs = {
+        "q1": {"hits": [{"path": "answer.md", "text": "Repeated answer."}]}
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["group_recall_at_5"] == 0.0
+
+
+def test_evaluate_counts_only_nonempty_explanation_traces(retrieval_benchmark_mod):
+    queries = [{"id": "n1", "required_groups": []}]
+    runs = {
+        "n1": {
+            "hits": [
+                {"path": "a.md", "text": "A", "explanation": {"kind": "span", "value": []}},
+                {"path": "b.md", "text": "B", "explanation": {"kind": "score", "value": None}},
+                {"path": "c.md", "text": "C", "explanation": {"kind": "score", "value": {"score": 1}}},
+            ]
+        }
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["mean_explained_hits_top_5"] == 1.0

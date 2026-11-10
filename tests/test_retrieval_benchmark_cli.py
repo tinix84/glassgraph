@@ -1,6 +1,7 @@
 """Behavior tests for the retrieval benchmark command interface."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -9,30 +10,163 @@ from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 
 
+MEASUREMENT_ARGS = [
+    "--setup-time-ms",
+    "100",
+    "--full-build-time-ms",
+    "200",
+    "--no-change-update-ms",
+    "10",
+    "--one-file-update-ms",
+    "20",
+    "--derived-index-size-bytes",
+    "4096",
+    "--offline-verified",
+]
+
+
+def _evidence_id(seed):
+    return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
+
+
+def _manifest(records, retrieval_benchmark_mod, split_membership):
+    return {
+        "schema_version": 1,
+        "corpus_snapshot_hash": "sha256:" + "a" * 64,
+        "query_set_hash": retrieval_benchmark_mod.query_set_hash(records),
+        "judgment_set_hash": retrieval_benchmark_mod.judgment_set_hash(records),
+        "split_membership": split_membership,
+        "adjudication_date": "2026-11-10",
+    }
+
+
+def _public_queries():
+    positives = [
+        {
+            "id": f"p{index}",
+            "query": f"PRIVATE QUERY TEXT {index}",
+            "required_groups": [[{
+                "evidence_id": _evidence_id("answer"),
+                "path": "answer.md",
+                "text": "Exact answer passage.",
+                "grade": "direct",
+            }]],
+        }
+        for index in range(1, 6)
+    ]
+    negatives = [
+        {
+            "id": f"n{index}",
+            "query": f"No answer {index}",
+            "required_groups": [],
+        }
+        for index in range(1, 6)
+    ]
+    return positives + negatives
+
+
+def _private_records():
+    records = []
+    for split, short, positive_count, negative_count in (
+        ("development", "dev", 30, 10),
+        ("evaluation", "eval", 15, 5),
+    ):
+        for index in range(1, positive_count + 1):
+            records.append(
+                {
+                    "id": f"private-v1-{short}-p{index:02d}",
+                    "split": split,
+                    "kind": "positive",
+                    "type": "exact",
+                    "query": f"{split} private positive {index}",
+                    "required_groups": [[{
+                        "evidence_id": _evidence_id(f"{short}-p{index:02d}"),
+                        "path": "wiki/answer.md",
+                        "text": "Exact answer.",
+                        "grade": "direct",
+                    }]],
+                    "adjudication_note": "",
+                    "owner_authored": True,
+                    "owner_adjudicated": True,
+                    "adjudicated_by": "Riccardo Tinivella",
+                    "adjudicated_date": "2026-11-10",
+                }
+            )
+        for index in range(1, negative_count + 1):
+            records.append(
+                {
+                    "id": f"private-v1-{short}-n{index:02d}",
+                    "split": split,
+                    "kind": "negative",
+                    "type": "negative",
+                    "query": f"{split} private negative {index}",
+                    "required_groups": [],
+                    "adjudication_note": "Owner checked alternate wording.",
+                    "owner_authored": True,
+                    "owner_adjudicated": True,
+                    "adjudicated_by": "Riccardo Tinivella",
+                    "adjudicated_date": "2026-11-10",
+                }
+            )
+    return records
+
+
+def _private_payload(retrieval_benchmark_mod):
+    records = _private_records()
+    return _add_manifest(
+        {"schema_version": 1, "benchmark_version": "private-v1", "records": records},
+        records,
+        retrieval_benchmark_mod,
+        {
+            split: [record["id"] for record in records if record["split"] == split]
+            for split in ("development", "evaluation")
+        },
+    )
+
+
+def _add_manifest(payload, records, retrieval_benchmark_mod, split_membership):
+    payload["manifest"] = _manifest(
+        records,
+        retrieval_benchmark_mod,
+        split_membership,
+    )
+    return payload
+
+
+def _private_args(workbook_path, output_path):
+    return [
+        "--queries",
+        str(workbook_path),
+        "--backend",
+        "grooveseek",
+        "--groove-executable",
+        "groove",
+        "--knowledge-base",
+        "corpus",
+        "--path-prefix",
+        "wiki",
+        "--privacy",
+        "private",
+        "--split",
+        "development",
+        "--output",
+        str(output_path),
+        *MEASUREMENT_ARGS,
+    ]
+
+
 def test_public_cli_prints_aggregate_only(
-    tmp_path, capsys, retrieval_benchmark_cli_mod
+    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
+    queries = _public_queries()
     queries_path = tmp_path / "queries.json"
     queries_path.write_text(
         json.dumps(
-            {
+            _add_manifest({
                 "schema_version": 1,
-                "queries": [
-                    {
-                        "id": "q1",
-                        "query": "PRIVATE QUERY TEXT",
-                        "required_groups": [
-                            [
-                                {
-                                    "path": "answer.md",
-                                    "text": "Exact answer passage.",
-                                    "grade": "direct",
-                                }
-                            ]
-                        ],
-                    }
-                ],
-            }
+                "benchmark_version": "public-v1",
+                "queries": queries,
+            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]})
         ),
         encoding="utf-8",
     )
@@ -68,6 +202,7 @@ def test_public_cli_prints_aggregate_only(
             "corpus",
             "--privacy",
             "public",
+            *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
         token_counter=lambda _text: 4,
@@ -79,68 +214,21 @@ def test_public_cli_prints_aggregate_only(
     assert payload["schema_version"] == 1
     assert payload["backend"] == "grooveseek"
     assert payload["summary"]["group_recall_at_5"] == 1.0
+    assert payload["measurements"]["full_build_time_ms"] == 200
+    assert payload["measurements"]["derived_index_size_bytes"] == 4096
+    assert payload["measurements"]["offline_verified"] is True
     assert "PRIVATE QUERY TEXT" not in output
     assert "answer.md" not in output
 
 
 def test_private_cli_filters_split_and_writes_report_without_stdout(
-    tmp_path, capsys, retrieval_benchmark_cli_mod
+    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
     workbook_path = tmp_path / "authoring-workbook.json"
     output_path = tmp_path / "private-report.json"
-    records = []
-    for split, short, positive_count, negative_count in (
-        ("development", "dev", 30, 10),
-        ("evaluation", "eval", 15, 5),
-    ):
-        for index in range(1, positive_count + 1):
-            records.append(
-                {
-                    "id": f"private-v1-{short}-p{index:02d}",
-                    "split": split,
-                    "kind": "positive",
-                    "type": "exact",
-                    "query": f"{split} private positive {index}",
-                    "required_groups": [
-                        [
-                            {
-                                "path": "wiki/answer.md",
-                                "text": "Exact answer.",
-                                "grade": "direct",
-                            }
-                        ]
-                    ],
-                    "adjudication_note": "",
-                    "owner_authored": True,
-                    "owner_adjudicated": True,
-                    "adjudicated_by": "Riccardo Tinivella",
-                    "adjudicated_date": "2026-11-10",
-                }
-            )
-        for index in range(1, negative_count + 1):
-            records.append(
-                {
-                    "id": f"private-v1-{short}-n{index:02d}",
-                    "split": split,
-                    "kind": "negative",
-                    "type": "negative",
-                    "query": f"{split} private negative {index}",
-                    "required_groups": [],
-                    "adjudication_note": "Owner checked alternate wording.",
-                    "owner_authored": True,
-                    "owner_adjudicated": True,
-                    "adjudicated_by": "Riccardo Tinivella",
-                    "adjudicated_date": "2026-11-10",
-                }
-            )
+    payload = _private_payload(retrieval_benchmark_mod)
     workbook_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "benchmark_version": "private-v1",
-                "records": records,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -181,6 +269,7 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
             "development",
             "--output",
             str(output_path),
+            *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
         token_counter=lambda _text: 4,
@@ -197,23 +286,19 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
     assert "evaluation private positive" not in output_path.read_text(encoding="utf-8")
 
 
-def test_public_cli_runs_qmd_adapter(tmp_path, capsys, retrieval_benchmark_cli_mod):
+def test_public_cli_runs_qmd_adapter(
+    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    queries = _public_queries()
     queries_path = tmp_path / "queries.json"
     document = tmp_path / "answer.md"
     queries_path.write_text(
         json.dumps(
-            {
+            _add_manifest({
                 "schema_version": 1,
-                "queries": [
-                    {
-                        "id": "q1",
-                        "query": "What is the answer?",
-                        "required_groups": [
-                            [{"path": "answer.md", "text": "Exact answer.", "grade": "direct"}]
-                        ],
-                    }
-                ],
-            }
+                "benchmark_version": "public-v1",
+                "queries": queries,
+            }, queries, retrieval_benchmark_mod, {"public": [item["id"] for item in queries]})
         ),
         encoding="utf-8",
     )
@@ -226,7 +311,7 @@ def test_public_cli_runs_qmd_adapter(tmp_path, capsys, retrieval_benchmark_cli_m
                         "score": 1.0,
                         "file": str(document),
                         "line": 1,
-                        "snippet": "@@ -1,1 @@\nExact answer.",
+                        "snippet": "@@ -1,1 @@\nExact answer passage.",
                         "explain": {"blendedScore": 1.0},
                     }
                 ]
@@ -253,6 +338,7 @@ def test_public_cli_runs_qmd_adapter(tmp_path, capsys, retrieval_benchmark_cli_m
             str(tmp_path),
             "--privacy",
             "public",
+            *MEASUREMENT_ARGS,
         ],
         process_runner=run_process,
         token_counter=lambda _text: 5,
@@ -318,6 +404,7 @@ def test_private_cli_rejects_incomplete_owner_benchmark(
                 "development",
                 "--output",
                 str(output_path),
+                *MEASUREMENT_ARGS,
             ],
             process_runner=must_not_run,
             token_counter=lambda _text: 1,
@@ -328,39 +415,20 @@ def test_private_cli_rejects_incomplete_owner_benchmark(
 
 
 def test_private_cli_rejects_unadjudicated_record(
-    tmp_path, retrieval_benchmark_cli_mod
+    tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
-    records = []
-    for split, short, positive_count, negative_count in (
-        ("development", "dev", 30, 10),
-        ("evaluation", "eval", 15, 5),
-    ):
-        for kind, short_kind, count in (
-            ("positive", "p", positive_count),
-            ("negative", "n", negative_count),
-        ):
-            for index in range(1, count + 1):
-                records.append(
-                    {
-                        "id": f"private-v1-{short}-{short_kind}{index:02d}",
-                        "split": split,
-                        "kind": kind,
-                        "query": f"{split} {kind} {index}",
-                        "required_groups": (
-                            [[{"path": "wiki/a.md", "text": "A", "grade": "direct"}]]
-                            if kind == "positive"
-                            else []
-                        ),
-                        "adjudication_note": "Checked" if kind == "negative" else "",
-                        "owner_authored": True,
-                        "owner_adjudicated": True,
-                    }
-                )
-    records[0]["owner_adjudicated"] = False
+    payload = _private_payload(retrieval_benchmark_mod)
+    payload["records"][0]["owner_adjudicated"] = False
+    records = payload["records"]
+    payload["manifest"] = _manifest(
+        records,
+        retrieval_benchmark_mod,
+        payload["manifest"]["split_membership"],
+    )
     workbook_path = tmp_path / "unadjudicated.json"
     output_path = tmp_path / "report.json"
     workbook_path.write_text(
-        json.dumps({"schema_version": 1, "benchmark_version": "private-v1", "records": records}),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -384,6 +452,7 @@ def test_private_cli_rejects_unadjudicated_record(
                 "development",
                 "--output",
                 str(output_path),
+                *MEASUREMENT_ARGS,
             ],
             process_runner=must_not_run,
             token_counter=lambda _text: 1,
@@ -391,3 +460,164 @@ def test_private_cli_rejects_unadjudicated_record(
 
     assert error.value.code == 2
     assert not output_path.exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    ["duplicate-id", "empty-positive", "bad-evidence-id"],
+)
+def test_private_cli_rejects_invalid_record_identity_or_judgment(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    invalid_case,
+):
+    payload = _private_payload(retrieval_benchmark_mod)
+    if invalid_case == "duplicate-id":
+        payload["records"][1]["id"] = payload["records"][0]["id"]
+    elif invalid_case == "empty-positive":
+        payload["records"][0]["required_groups"] = []
+    else:
+        payload["records"][0]["required_groups"][0][0]["evidence_id"] = "not-a-hash"
+    records = payload["records"]
+    payload["manifest"] = _manifest(
+        records,
+        retrieval_benchmark_mod,
+        {
+            split: [record["id"] for record in records if record["split"] == split]
+            for split in ("development", "evaluation")
+        },
+    )
+    workbook_path = tmp_path / f"{invalid_case}.json"
+    output_path = tmp_path / "report.json"
+    workbook_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert not output_path.exists()
+
+
+def test_private_cli_rejects_output_collision_before_backend_execution(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    workbook_path = tmp_path / "workbook.json"
+    original = json.dumps(_private_payload(retrieval_benchmark_mod))
+    workbook_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, workbook_path),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert workbook_path.read_text(encoding="utf-8") == original
+
+
+def test_private_cli_refuses_to_replace_existing_report(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    workbook_path = tmp_path / "workbook.json"
+    output_path = tmp_path / "report.json"
+    workbook_path.write_text(
+        json.dumps(_private_payload(retrieval_benchmark_mod)),
+        encoding="utf-8",
+    )
+    output_path.write_text("keep me", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert output_path.read_text(encoding="utf-8") == "keep me"
+
+
+def test_public_cli_rejects_categories_with_fewer_than_five_queries(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    queries = _public_queries()
+    queries.pop(0)
+    payload = _add_manifest(
+        {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+    )
+    queries_path = tmp_path / "small.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(queries_path),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+def test_cli_rejects_manifest_hash_mismatch_before_backend_execution(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "benchmark_version": "public-v1", "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+    )
+    payload["queries"][0]["query"] = "Changed without a new manifest"
+    queries_path = tmp_path / "changed.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(queries_path),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2

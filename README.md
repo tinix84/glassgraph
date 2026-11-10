@@ -48,7 +48,13 @@ python retrieval_benchmark_cli.py `
   --groove-executable <groove-command> `
   --knowledge-base <fixture-index> `
   --tokenizer <pinned-tokenizer.json> `
-  --privacy public
+  --privacy public `
+  --setup-time-ms <milliseconds> `
+  --full-build-time-ms <milliseconds> `
+  --no-change-update-ms <milliseconds> `
+  --one-file-update-ms <milliseconds> `
+  --derived-index-size-bytes <bytes> `
+  --offline-verified
 ```
 
 Run a private split only on the local computer. The command rejects an incomplete or unadjudicated 60-record workbook.
@@ -63,10 +69,20 @@ python retrieval_benchmark_cli.py `
   --path-prefix wiki `
   --privacy private `
   --split development `
-  --output <local-private-report.json>
+  --output <new-local-private-report.json> `
+  --setup-time-ms <milliseconds> `
+  --full-build-time-ms <milliseconds> `
+  --no-change-update-ms <milliseconds> `
+  --one-file-update-ms <milliseconds> `
+  --derived-index-size-bytes <bytes> `
+  --offline-verified
 ```
 
-The public command prints aggregate metrics only. The private command writes its aggregate report to the specified local file and prints no benchmark data.
+The query file contains the frozen manifest and evidence IDs. The command rejects a stale query-set hash, judgment-set hash, or split map.
+
+The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
+
+The private command writes its aggregate report to a new local file. It prints no benchmark data and never replaces an existing file.
 
 Positive retrieval metrics use ranked raw hits. Negative false-positive metrics use accepted hits after backend confidence abstention. The report also keeps the raw negative false-positive rate so that confidence behavior is visible.
 

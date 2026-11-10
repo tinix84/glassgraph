@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 
 def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_backends_mod):
     def run_process(_args, _environment):
@@ -120,3 +122,20 @@ def test_run_process_captures_output_latency_and_working_set(retrieval_backends_
     assert measured["stdout"].splitlines() == ["ready"]
     assert measured["elapsed_ms"] >= 0
     assert measured["peak_working_set_bytes"] > 0
+
+
+def test_run_process_does_not_expose_backend_stderr(retrieval_backends_mod):
+    private_text = "PRIVATE QUERY AND PATH wiki/private.md"
+
+    with pytest.raises(RuntimeError) as error:
+        retrieval_backends_mod.run_process(
+            [
+                sys.executable,
+                "-c",
+                f"import sys; print({private_text!r}, file=sys.stderr); raise SystemExit(7)",
+            ],
+            {},
+        )
+
+    assert str(error.value) == "backend command failed with exit code 7"
+    assert private_text not in str(error.value)
