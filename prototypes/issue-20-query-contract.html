@@ -87,10 +87,11 @@
     const QueryContract = (() => {
       const IDS = {
         evidence: 'sha256:e95d4b50165e2c6cc4b1e425c8719b630a236accb41b1b81ff2a848270bdacc4',
+        vendorEvidence: 'sha256:adf446220c2e9d5e8457c465958106fc45bd6fb537bbfde287f3f263a9938e63',
         entity: 'sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33',
-        entityB: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
-        assertion: 'sha256:d4cdb32b5f1d1ae3ed800d1502ff784ea67a51c0dba9d9132719059fd1dedacb',
-        predicate: 'sha256:c4fe157c9cd173e63c5e0f92ca20e8094a133e170cd385fd86263a3bac6bd9b6',
+        entityB: 'sha256:ac1d4b4eb4b28981be9bb4db7ba51698eabb86fbb3f93245730ceac874ba11a6',
+        assertion: 'sha256:1bfcce859602ef3946ae5615aec1abf85555a2b717c933892d19e052484b0c89',
+        predicate: 'sha256:1e69314758fdbe7548d7e3dbf091a3e73a72de6e522b2b4d2acac16d5c9e625b',
         corpus: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         backend: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
       };
@@ -156,6 +157,7 @@
           backend_trace:{
             locator_kind:trace.locator_kind,
             path:'wiki/example.md',
+            line:backend === 'qmd' ? 16 : null,
             match_spans:backend === 'groove' ? [{ start:0, end:26 }] : null,
             passage:'Unicode heading evidence.\n',
             raw_preserved:true
@@ -166,12 +168,12 @@
 
       function graphResult(operation, indexState) {
         if (operation === 'related') {
-          return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, predicate_id:IDS.predicate, evidence_ids:[IDS.evidence] }, score:null };
+          return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, subject_id:IDS.entity, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entityB }, evidence_ids:[IDS.vendorEvidence] }, score:null };
         }
         if (operation === 'path') {
           return { result_id:'result:1', kind:'typed_path', rank:1, steps:[
             { kind:'node', node:{ kind:'entity', id:IDS.entity } },
-            { kind:'edge', edge:{ kind:'assertion', id:IDS.assertion, predicate_id:IDS.predicate, evidence_ids:[IDS.evidence], direction:'forward' } },
+            { kind:'edge', edge:{ kind:'assertion', id:IDS.assertion, subject_id:IDS.entity, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entityB }, evidence_ids:[IDS.vendorEvidence], direction:'forward' } },
             { kind:'node', node:{ kind:'entity', id:IDS.entityB } }
           ], score:null };
         }

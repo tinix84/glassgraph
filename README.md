@@ -94,15 +94,21 @@ Development runs can tune settings. Each report records a settings hash derived 
 
 GrooveSeek runs pass the pinned model with `--model`. They also set `FASTEMBED_CACHE_DIR` to the fingerprinted model-cache directory. This overrides an embedding provider in the GrooveSeek configuration.
 
+The runner compares the GrooveSeek document roster and content hashes with the frozen corpus. It also requires one indexed chunk and vector for each document.
+
 QMD runs require `--qmd-config <index-name>.yml` and `--qmd-index-db <index.sqlite>`. The configuration must define `models.embed`, `models.generate`, and `models.rerank`.
 
-The embed value must be the same absolute path as the fingerprinted model file. The runner verifies the stored configuration hash before retrieval. It also verifies vector coverage for each active document in the selected collection.
+The embed value and `--retrieval-model-id` must name the same absolute model file. The runner verifies the stored configuration hash before retrieval. It also verifies the stored model and embedding fingerprint.
+
+The selected QMD collection must contain the complete frozen document roster. Every indexed chunk must have its exact `hash_seq` vector key.
 
 The runner pins `INDEX_PATH`, `QMD_CONFIG_DIR`, and `QMD_EMBED_MODEL`. It clears ambient QMD query settings. Each query must return a vector-score trace. This trace proves that hybrid retrieval ran.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 
-The private command writes its aggregate report to a new local file. It prints no benchmark data. It never replaces an existing file.
+The private workbook and report must stay under the vault-side `.glassgraph/benchmarks/private/v1/` directory. The vault root must not be a Git worktree or network share.
+
+The private command writes its aggregate report to a new file in that directory. It prints no benchmark data. It never replaces an existing file.
 
 Positive retrieval metrics use ranked raw hits. Negative false-positive metrics use accepted hits after backend confidence abstention. The report also keeps the raw negative false-positive rate so that confidence behavior is visible.
 

@@ -267,6 +267,32 @@ def test_grooveseek_adapter_rejects_malformed_scoring_fields(
         adapter.query("query", limit=10)
 
 
+def test_grooveseek_adapter_rejects_oversized_json_score(
+    retrieval_backends_mod,
+):
+    adapter = retrieval_backends_mod.GrooveSeekAdapter(
+        executable="groove",
+        knowledge_base="corpus",
+        process_runner=lambda *_args: {
+            "stdout": json.dumps({
+                "results": [{
+                    "path": "answer.md",
+                    "content": "answer",
+                    "score": 10**400,
+                    "match_spans": [],
+                }],
+                "low_confidence": False,
+            }),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 1,
+        },
+        token_counter=lambda _text: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        adapter.query("query", limit=10)
+
+
 def test_qmd_adapter_requires_vector_scores_for_hybrid_run(
     tmp_path, retrieval_backends_mod
 ):

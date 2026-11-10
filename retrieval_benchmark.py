@@ -142,7 +142,7 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
     root = Path(corpus_root)
     documents = [
         {
-            "path": path.relative_to(root).as_posix(),
+            "path": canonical_path,
             "sha256": "sha256:"
             + hashlib.sha256(
                 unicodedata.normalize(
@@ -154,14 +154,7 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
                 ).encode()
             ).hexdigest(),
         }
-        for path in sorted(
-            (
-                item
-                for item in root.rglob("*")
-                if item.is_file() and item.suffix == ".md"
-            ),
-            key=lambda item: item.relative_to(root).as_posix(),
-        )
+        for canonical_path, path in _corpus_markdown_paths(root)
     ]
     return _canonical_hash("glassgraph:benchmark-corpus:v1", documents)
 
@@ -178,6 +171,24 @@ def _canonical_document_path(value: str) -> str:
     if re.match(r"^[A-Za-z]:", canonical):
         raise ValueError("Evidence judgment path is outside the corpus")
     return canonical
+
+
+def _corpus_markdown_paths(corpus_root: str | Path) -> list[tuple[str, Path]]:
+    root = Path(corpus_root).resolve()
+    documents = {}
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix != ".md":
+            continue
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError as error:
+            raise ValueError("The Markdown corpus contains an unsafe path") from error
+        canonical = _canonical_document_path(relative)
+        if canonical in documents and documents[canonical] != resolved:
+            raise ValueError("The Markdown corpus contains a canonical path collision")
+        documents[canonical] = resolved
+    return sorted(documents.items())
 
 
 def _lf_lines(text: str):
@@ -239,14 +250,14 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
             continue
         if html_block is not None:
             if html_block == "blank":
-                if not source_line.strip():
+                if not source_line.strip(" \t"):
                     html_block = None
             elif html_block.search(source_line):
                 html_block = None
             paragraph_open = False
             offset += len(line)
             continue
-        if not source_line.strip():
+        if not source_line.strip(" \t"):
             paragraph_open = False
             offset += len(line)
             continue
@@ -272,7 +283,10 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         if match:
             level = len(match.group(1))
             raw_title = match.group(2) or ""
-            raw_title = re.sub(r"[ \t]+#+[ \t]*$", "", raw_title)
+            if re.fullmatch(r"#+[ \t]*", raw_title):
+                raw_title = ""
+            else:
+                raw_title = re.sub(r"[ \t]+#+[ \t]*$", "", raw_title)
             title = unicodedata.normalize("NFC", raw_title.strip(" \t"))
             while stack and stack[-1]["level"] >= level:
                 stack.pop()
@@ -340,6 +354,8 @@ def _original_utf8_byte_offset(
         content_end = normalized_cursor + len(normalized_content)
         if normalized_offset <= content_end:
             column = normalized_offset - normalized_cursor
+            if unicodedata.is_normalized("NFC", content):
+                return byte_cursor + len(content[:column].encode("utf-8"))
             target_prefix = normalized_content[:column]
             target_suffix = normalized_content[column:]
             boundaries = [
@@ -373,11 +389,9 @@ def derive_evidence_records(
     canonical_path = _canonical_document_path(judgment["path"])
     if PurePosixPath(canonical_path).suffix != ".md":
         raise ValueError("Evidence judgment is outside the frozen Markdown corpus")
-    source_path = (root / Path(*PurePosixPath(canonical_path).parts)).resolve()
-    try:
-        source_path.relative_to(root)
-    except ValueError as error:
-        raise ValueError("Evidence judgment path is outside the corpus") from error
+    source_path = dict(_corpus_markdown_paths(root)).get(canonical_path)
+    if source_path is None:
+        raise ValueError("Evidence judgment path is outside the corpus")
     source_bytes = source_path.read_bytes()
     original_text = source_bytes.decode("utf-8")
     text = unicodedata.normalize(
@@ -507,7 +521,8 @@ def verify_evidence_hits(
                 verified_ids = set()
                 for passage, occurrences, selected in judgments:
                     if (
-                        hit.get("path") != selected["path"]
+                        not isinstance(hit.get("path"), str)
+                        or _canonical_document_path(hit["path"]) != selected["path"]
                         or not _normalized_hit_contains_passage(
                             str(hit.get("text") or ""),
                             selected["normalized_passage"],

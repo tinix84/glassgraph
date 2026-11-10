@@ -212,6 +212,7 @@ def test_qmd_config_must_use_pinned_model_artifact(
         qmd_config=config,
         index="fixture",
         retrieval_model_artifact=model,
+        retrieval_model_id=str(model),
     )
 
     config.write_text("collections: {}\n", encoding="utf-8")
@@ -231,14 +232,52 @@ def test_qmd_config_must_use_pinned_model_artifact(
     assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
 
 
+def test_qmd_config_parses_yaml_date_like_scalar_as_text(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    model = (tmp_path / "model.gguf").resolve()
+    model.write_text("model", encoding="utf-8")
+    config = tmp_path / "fixture.yml"
+    config.write_text(
+        f"models:\n  embed: {json.dumps(str(model))}\n"
+        "  generate: local-generate.gguf\n"
+        "  rerank: local-rerank.gguf\n"
+        "metadata:\n  built: 2026-11-10\n",
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(
+        qmd_config=config,
+        index="fixture",
+        retrieval_model_artifact=model,
+        retrieval_model_id=str(model),
+    )
+
+    payload = retrieval_benchmark_cli_mod._read_qmd_config(args)
+
+    assert payload["metadata"]["built"] == "2026-11-10"
+    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(
+        args,
+        payload,
+    )
+
+
 def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
     tmp_path, retrieval_benchmark_cli_mod
 ):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    document = corpus / "answer.md"
+    document.write_text("Answer.\n", encoding="utf-8")
+    document_hash = hashlib.sha256(document.read_bytes()).hexdigest()
     database = tmp_path / "index.sqlite"
+    model = (tmp_path / "model.gguf").resolve()
+    model.write_text("model", encoding="utf-8")
     config_payload = {
-        "collections": {"fixture": {"path": ".", "pattern": "**/*.md"}},
+        "collections": {
+            "fixture": {"path": str(corpus), "pattern": "**/*.md"}
+        },
         "models": {
-            "embed": str((tmp_path / "model.gguf").resolve()),
+            "embed": str(model),
             "generate": "local-generate.gguf",
             "rerank": "local-rerank.gguf",
         },
@@ -257,12 +296,15 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             CREATE TABLE documents (
                 id INTEGER PRIMARY KEY,
                 collection TEXT NOT NULL,
+                path TEXT NOT NULL,
                 hash TEXT NOT NULL,
                 active INTEGER NOT NULL
             );
             CREATE TABLE content_vectors (
                 hash TEXT NOT NULL,
+                seq INTEGER NOT NULL,
                 model TEXT NOT NULL,
+                embed_fingerprint TEXT NOT NULL,
                 total_chunks INTEGER NOT NULL
             );
             CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
@@ -274,22 +316,33 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             (config_hash,),
         )
         connection.execute(
-            "INSERT INTO documents VALUES (1, 'fixture', 'doc-hash', 1)"
+            "INSERT INTO documents VALUES (1, 'fixture', 'answer.md', ?, 1)",
+            (document_hash,),
         )
         connection.execute(
-            "INSERT INTO content_vectors VALUES ('doc-hash', 'model-id', 1)"
+            "INSERT INTO content_vectors VALUES (?, 0, ?, 'fixture-fp', 1)",
+            (document_hash, str(model)),
         )
-        connection.execute("INSERT INTO vectors_vec_rowids VALUES ('doc-hash:0')")
+        connection.execute(
+            "INSERT INTO vectors_vec_rowids VALUES (?)",
+            (document_hash + "_0",),
+        )
     args = SimpleNamespace(
         qmd_index_db=database,
         collection="fixture",
-        retrieval_model_id="model-id",
+        retrieval_model_id=str(model),
+        corpus_root=corpus,
+        benchmark_corpus_root=corpus,
+        path_prefix=None,
     )
 
     assert retrieval_benchmark_cli_mod._qmd_index_is_ready(args, config_payload)
 
     with sqlite3.connect(database) as connection:
-        connection.execute("DELETE FROM vectors_vec_rowids")
+        connection.execute(
+            "UPDATE vectors_vec_rowids SET id = ?",
+            (document_hash + "_99",),
+        )
 
     assert not retrieval_benchmark_cli_mod._qmd_index_is_ready(
         args, config_payload
@@ -742,11 +795,12 @@ def test_cli_requires_complete_backend_configuration(
 def test_private_cli_requires_retrieval_model_identity(
     tmp_path, capsys, retrieval_benchmark_cli_mod
 ):
+    workspace = _private_workspace(tmp_path)
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
             [
                 "--queries",
-                str(tmp_path / "unused.json"),
+                str(workspace / "unused.json"),
                 "--backend",
                 "grooveseek",
                 "--groove-executable",
@@ -758,7 +812,7 @@ def test_private_cli_requires_retrieval_model_identity(
                 "--split",
                 "development",
                 "--output",
-                str(tmp_path / "report.json"),
+                str(workspace / "report.json"),
                 "--benchmark-corpus-root",
                 str(tmp_path),
                 *MEASUREMENT_ARGS,
@@ -956,6 +1010,73 @@ def test_cli_rejects_result_limit_below_reported_cutoffs(
     assert "at least 10" in capsys.readouterr().err
 
 
+def _write_groove_index(corpus_root):
+    database = corpus_root.parent / ".groove.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY,
+                path TEXT UNIQUE NOT NULL,
+                content_hash TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY,
+                document_id INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS vec_chunks_rowids (
+                rowid INTEGER PRIMARY KEY,
+                id TEXT
+            );
+            """
+        )
+        for index, document in enumerate(
+            sorted(path for path in corpus_root.rglob("*") if path.suffix == ".md"),
+            start=1,
+        ):
+            relative = document.relative_to(corpus_root).as_posix()
+            content_hash = hashlib.sha256(document.read_bytes()).hexdigest()
+            connection.execute(
+                "INSERT OR REPLACE INTO documents VALUES (?, ?, ?)",
+                (index, relative, content_hash),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO chunks VALUES (?, ?)",
+                (index, index),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO vec_chunks_rowids(rowid, id) VALUES (?, NULL)",
+                (index,),
+            )
+
+
+def test_groove_index_preflight_rejects_stale_document_roster(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    corpus = _write_corpus(tmp_path)
+    _write_groove_index(corpus)
+    args = SimpleNamespace(
+        knowledge_base=str(corpus),
+        benchmark_corpus_root=corpus,
+        path_prefix=None,
+    )
+
+    assert retrieval_benchmark_cli_mod._groove_index_is_ready(args)
+
+    (corpus / "hard-distractor.md").write_text(
+        "Hard distractor.\n",
+        encoding="utf-8",
+    )
+
+    assert not retrieval_benchmark_cli_mod._groove_index_is_ready(args)
+
+
+def _private_workspace(tmp_path):
+    workspace = tmp_path / ".glassgraph" / "benchmarks" / "private" / "v1"
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
 def _private_args(workbook_path, output_path, corpus_root):
     artifact_root = corpus_root.parent / "private-benchmark-artifacts"
     artifact_root.mkdir(exist_ok=True)
@@ -965,7 +1086,6 @@ def _private_args(workbook_path, output_path, corpus_root):
     model.mkdir(exist_ok=True)
     model_file = model / "embedding-model.bin"
     groove_config = artifact_root / "groove.toml"
-    groove_index = corpus_root.parent / ".groove.db"
     for path, content in (
         (executable, "groove-test-binary"),
         (tokenizer, "tokenizer-test-data"),
@@ -973,10 +1093,8 @@ def _private_args(workbook_path, output_path, corpus_root):
         (groove_config, "[search]\n"),
     ):
         path.write_text(content, encoding="utf-8")
-    if not groove_index.exists():
-        with sqlite3.connect(groove_index) as connection:
-            connection.execute("CREATE TABLE evidence (value TEXT)")
-            connection.execute("INSERT INTO evidence VALUES ('index-test-data')")
+    knowledge_base = corpus_root / "wiki"
+    _write_groove_index(knowledge_base)
     return [
         "--queries",
         str(workbook_path),
@@ -985,7 +1103,7 @@ def _private_args(workbook_path, output_path, corpus_root):
         "--groove-executable",
         str(executable),
         "--knowledge-base",
-        str(corpus_root),
+        str(knowledge_base),
         "--groove-config",
         str(groove_config),
         "--tokenizer",
@@ -1022,9 +1140,7 @@ def _public_groove_args(tmp_path, corpus_root):
         (tokenizer, "tokenizer"),
     ):
         path.write_text(content, encoding="utf-8")
-    with sqlite3.connect(corpus_root.parent / ".groove.db") as connection:
-        connection.execute("CREATE TABLE IF NOT EXISTS chunks (value TEXT)")
-        connection.execute("INSERT INTO chunks VALUES ('fixture')")
+    _write_groove_index(corpus_root)
     return [
         "--groove-executable", str(executable),
         "--groove-config", str(config),
@@ -1076,12 +1192,15 @@ def _public_qmd_args(tmp_path, corpus_root):
             CREATE TABLE documents (
                 id INTEGER PRIMARY KEY,
                 collection TEXT NOT NULL,
+                path TEXT NOT NULL,
                 hash TEXT NOT NULL,
                 active INTEGER NOT NULL
             );
             CREATE TABLE content_vectors (
                 hash TEXT NOT NULL,
+                seq INTEGER NOT NULL,
                 model TEXT NOT NULL,
+                embed_fingerprint TEXT NOT NULL,
                 total_chunks INTEGER NOT NULL
             );
             CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
@@ -1092,13 +1211,24 @@ def _public_qmd_args(tmp_path, corpus_root):
             "INSERT INTO store_config VALUES ('config_hash', ?)",
             (config_hash,),
         )
-        connection.execute(
-            "INSERT INTO documents VALUES (1, 'fixture', 'doc-hash', 1)"
-        )
-        connection.execute(
-            "INSERT INTO content_vectors VALUES ('doc-hash', 'fixture-model', 1)"
-        )
-        connection.execute("INSERT INTO vectors_vec_rowids VALUES ('doc-hash:0')")
+        for index, document in enumerate(
+            sorted(path for path in corpus_root.rglob("*") if path.suffix == ".md"),
+            start=1,
+        ):
+            document_hash = hashlib.sha256(document.read_bytes()).hexdigest()
+            relative = document.relative_to(corpus_root).as_posix()
+            connection.execute(
+                "INSERT INTO documents VALUES (?, 'fixture', ?, ?, 1)",
+                (index, relative, document_hash),
+            )
+            connection.execute(
+                "INSERT INTO content_vectors VALUES (?, 0, ?, 'fixture-fp', 1)",
+                (document_hash, str(model.resolve())),
+            )
+            connection.execute(
+                "INSERT INTO vectors_vec_rowids VALUES (?)",
+                (document_hash + "_0",),
+            )
     return [
         "--node-executable", str(node),
         "--qmd-script", str(script),
@@ -1108,7 +1238,7 @@ def _public_qmd_args(tmp_path, corpus_root):
         "--collection", "fixture",
         "--corpus-root", str(corpus_root),
         "--tokenizer", str(tokenizer),
-        "--retrieval-model-id", "fixture-model",
+        "--retrieval-model-id", str(model.resolve()),
         "--retrieval-model-artifact", str(model),
     ]
 
@@ -1351,8 +1481,9 @@ def test_public_cli_executes_queries_in_canonical_id_order(
 def test_private_cli_filters_split_and_writes_report_without_stdout(
     tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
-    workbook_path = tmp_path / "authoring-workbook.json"
-    output_path = tmp_path / "private-report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "authoring-workbook.json"
+    output_path = workspace / "private-report.json"
     corpus_root = _write_corpus(tmp_path, private=True)
     payload = _private_payload(retrieval_benchmark_mod, corpus_root)
     workbook_path.write_text(
@@ -1396,6 +1527,30 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
     assert "evaluation private positive" not in output_path.read_text(encoding="utf-8")
 
 
+def test_private_cli_rejects_report_outside_vault_workspace(
+    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "authoring-workbook.json"
+    workbook_path.write_text(
+        json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "public-report.json"
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert "vault-side private workspace" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
 @pytest.mark.parametrize(
     "invalid_case",
     ["missing", "mismatch", "changed-settings", "malformed-lock-map"],
@@ -1409,8 +1564,9 @@ def test_private_evaluation_requires_manifest_settings_lock(
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
     payload = _private_payload(retrieval_benchmark_mod, corpus_root)
-    workbook_path = tmp_path / "workbook.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "workbook.json"
+    output_path = workspace / "report.json"
     args = _private_args(workbook_path, output_path, corpus_root)
     parsed_args = retrieval_benchmark_cli_mod._parser().parse_args(args)
     expected_lock = retrieval_benchmark_mod.backend_settings_lock(
@@ -1452,8 +1608,9 @@ def test_private_evaluation_records_matching_settings_lock(
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
     payload = _private_payload(retrieval_benchmark_mod, corpus_root)
-    workbook_path = tmp_path / "workbook.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "workbook.json"
+    output_path = workspace / "report.json"
     args = _private_args(workbook_path, output_path, corpus_root)
     parsed_args = retrieval_benchmark_cli_mod._parser().parse_args(args)
     settings_identity = retrieval_benchmark_cli_mod._backend_settings_payload(
@@ -1620,8 +1777,9 @@ def test_private_cli_rejects_incomplete_owner_benchmark(
     tmp_path, retrieval_benchmark_cli_mod
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
-    workbook_path = tmp_path / "incomplete.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "incomplete.json"
+    output_path = workspace / "report.json"
     workbook_path.write_text(
         json.dumps(
             {
@@ -1678,8 +1836,9 @@ def test_private_cli_rejects_unadjudicated_record(
         payload["manifest"]["split_membership"],
         corpus_root,
     )
-    workbook_path = tmp_path / "unadjudicated.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "unadjudicated.json"
+    output_path = workspace / "report.json"
     workbook_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -1745,8 +1904,9 @@ def test_private_cli_rejects_invalid_record_identity_or_judgment(
         },
         corpus_root,
     )
-    workbook_path = tmp_path / f"{invalid_case}.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / f"{invalid_case}.json"
+    output_path = workspace / "report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(SystemExit) as error:
@@ -1766,7 +1926,7 @@ def test_private_cli_rejects_output_collision_before_backend_execution(
     retrieval_benchmark_mod,
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
-    workbook_path = tmp_path / "workbook.json"
+    workbook_path = _private_workspace(tmp_path) / "workbook.json"
     original = json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root))
     workbook_path.write_text(original, encoding="utf-8")
 
@@ -1787,8 +1947,9 @@ def test_private_cli_refuses_to_replace_existing_report(
     retrieval_benchmark_mod,
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
-    workbook_path = tmp_path / "workbook.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "workbook.json"
+    output_path = workspace / "report.json"
     workbook_path.write_text(
         json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
         encoding="utf-8",
@@ -2009,8 +2170,9 @@ def test_cli_redacts_private_evidence_validation_failures(
         payload["manifest"]["split_membership"],
         corpus_root,
     )
-    workbook_path = tmp_path / "private-workbook.json"
-    output_path = tmp_path / "private-report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "private-workbook.json"
+    output_path = workspace / "private-report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(SystemExit) as error:
@@ -2032,8 +2194,9 @@ def test_cli_redacts_missing_private_workbook_path(
     tmp_path, capsys, retrieval_benchmark_cli_mod
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
-    workbook_path = tmp_path / "secret-private-workbook.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "secret-private-workbook.json"
+    output_path = workspace / "report.json"
 
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
@@ -2055,8 +2218,9 @@ def test_cli_redacts_private_report_write_failure(
     retrieval_benchmark_mod,
 ):
     corpus_root = _write_corpus(tmp_path, private=True)
-    workbook_path = tmp_path / "authoring-workbook.json"
-    output_path = tmp_path / "secret-missing-parent" / "private-report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "authoring-workbook.json"
+    output_path = workspace / "secret-missing-parent" / "private-report.json"
     workbook_path.write_text(
         json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
         encoding="utf-8",
@@ -2111,8 +2275,9 @@ def test_private_cli_rejects_unexpected_distribution_bucket(
         },
         corpus_root,
     )
-    workbook_path = tmp_path / "extra.json"
-    output_path = tmp_path / "report.json"
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "extra.json"
+    output_path = workspace / "report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(SystemExit) as error:

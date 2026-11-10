@@ -772,6 +772,77 @@ def test_unicode_line_separator_does_not_create_markdown_heading(
     assert records[0]["line_start"] == 2
 
 
+def test_atx_closing_markers_can_form_an_empty_heading(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# ###\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading"] == ""
+
+
+def test_nonbreaking_space_does_not_close_commonmark_html_block(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "<div>\n\u00a0\n# Not a heading\n</div>\n\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading"] == ""
+
+
+def test_nfc_source_mapping_verifies_nfd_backend_path(
+    tmp_path, retrieval_benchmark_mod
+):
+    physical_name = "re\u0301sume\u0301.md"
+    (tmp_path / physical_name).write_text("Exact evidence.\n", encoding="utf-8")
+    judgment = {"path": physical_name, "text": "Exact evidence.", "grade": "direct"}
+    record = retrieval_benchmark_mod.derive_evidence_records(tmp_path, judgment)[0]
+    judgment["evidence_id"] = record["evidence_id"]
+    queries = [{"id": "q1", "query": "evidence", "required_groups": [[judgment]]}]
+    hit = {"path": physical_name, "text": "Exact evidence."}
+    runs = {"q1": {"hits": [hit], "raw_hits": [hit]}}
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert hit["evidence_ids"] == [record["evidence_id"]]
+    assert retrieval_benchmark_mod.evaluate(queries, runs)["group_recall_at_5"] == 1.0
+
+
+def test_nfc_byte_mapping_uses_linear_fast_path(monkeypatch, retrieval_benchmark_mod):
+    original_normalize = retrieval_benchmark_mod.unicodedata.normalize
+    calls = 0
+
+    def counting_normalize(form, value):
+        nonlocal calls
+        calls += 1
+        return original_normalize(form, value)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_mod.unicodedata,
+        "normalize",
+        counting_normalize,
+    )
+
+    offset = retrieval_benchmark_mod._original_utf8_byte_offset("漢" * 40_000, 20_000)
+
+    assert offset == 60_000
+    assert calls == 1
+
+
 def test_derive_evidence_rejects_non_markdown_document(
     tmp_path, retrieval_benchmark_mod
 ):

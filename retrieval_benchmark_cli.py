@@ -8,6 +8,7 @@ import math
 import re
 import shutil
 import sqlite3
+import unicodedata
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -20,6 +21,20 @@ import retrieval_benchmark
 
 
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class _QmdYamlLoader(yaml.SafeLoader):
+    pass
+
+
+_QmdYamlLoader.yaml_implicit_resolvers = {
+    key: [
+        (tag, pattern)
+        for tag, pattern in resolvers
+        if tag != "tag:yaml.org,2002:timestamp"
+    ]
+    for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
 
 
 def _valid_judgment(passage: object, grades: set[str]) -> bool:
@@ -206,7 +221,10 @@ def _backend_settings_payload(args) -> dict:
 
 
 def _read_qmd_config(args) -> dict:
-    payload = yaml.safe_load(args.qmd_config.read_text(encoding="utf-8"))
+    payload = yaml.load(
+        args.qmd_config.read_text(encoding="utf-8"),
+        Loader=_QmdYamlLoader,
+    )
     if not isinstance(payload, dict):
         raise ValueError("QMD configuration must be a mapping")
     return payload
@@ -230,7 +248,82 @@ def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
     return (
         configured_path.is_absolute()
         and configured_path.resolve() == args.retrieval_model_artifact.resolve()
+        and args.retrieval_model_id == str(configured_path.resolve())
     )
+
+
+def _corpus_documents(root: Path, path_prefix: str | None = None) -> dict:
+    documents = {}
+    for canonical_path, path in retrieval_benchmark._corpus_markdown_paths(root):
+        mapped_path = (
+            retrieval_benchmark._canonical_document_path(
+                f"{path_prefix}/{canonical_path}"
+            )
+            if path_prefix
+            else canonical_path
+        )
+        source_bytes = path.read_bytes()
+        normalized = unicodedata.normalize(
+            "NFC",
+            source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"),
+        ).encode()
+        documents[mapped_path] = {
+            "raw_hash": hashlib.sha256(source_bytes).hexdigest(),
+            "normalized_hash": hashlib.sha256(normalized).hexdigest(),
+        }
+    return documents
+
+
+def _backend_source_matches_benchmark(args, backend_root: Path) -> bool:
+    backend_documents = _corpus_documents(backend_root, args.path_prefix)
+    benchmark_documents = _corpus_documents(args.benchmark_corpus_root)
+    return {
+        path: item["normalized_hash"] for path, item in backend_documents.items()
+    } == {
+        path: item["normalized_hash"] for path, item in benchmark_documents.items()
+    }
+
+
+def _groove_index_is_ready(args) -> bool:
+    source_root = Path(args.knowledge_base).resolve()
+    try:
+        if not _backend_source_matches_benchmark(args, source_root):
+            return False
+        expected = {
+            path: item["raw_hash"]
+            for path, item in _corpus_documents(source_root).items()
+        }
+        database = source_root.parent / ".groove.db"
+        uri = database.resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if not {"documents", "chunks", "vec_chunks_rowids"}.issubset(tables):
+                return False
+            indexed = {
+                retrieval_benchmark._canonical_document_path(path): content_hash
+                for path, content_hash in connection.execute(
+                    "SELECT path, content_hash FROM documents"
+                )
+            }
+            unchunked = connection.execute(
+                "SELECT COUNT(*) FROM documents AS d "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM chunks AS c WHERE c.document_id = d.id"
+                ")"
+            ).fetchone()[0]
+            missing_vectors = connection.execute(
+                "SELECT COUNT(*) FROM chunks AS c "
+                "LEFT JOIN vec_chunks_rowids AS vr ON vr.rowid = c.id "
+                "WHERE vr.rowid IS NULL"
+            ).fetchone()[0]
+    except (OSError, UnicodeError, ValueError, sqlite3.Error):
+        return False
+    return bool(expected) and indexed == expected and unchunked == 0 and missing_vectors == 0
 
 
 def _qmd_index_is_ready(args, config_payload: dict) -> bool:
@@ -241,14 +334,21 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
         "vectors_vec",
         "vectors_vec_rowids",
     }
-    config_hash = hashlib.sha256(
-        json.dumps(
-            config_payload,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
     try:
+        config_hash = hashlib.sha256(
+            json.dumps(
+                config_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        source_root = Path(args.corpus_root).resolve()
+        if not _backend_source_matches_benchmark(args, source_root):
+            return False
+        expected_documents = {
+            path: item["raw_hash"]
+            for path, item in _corpus_documents(source_root).items()
+        }
         uri = args.qmd_index_db.resolve().as_uri() + "?mode=ro"
         with sqlite3.connect(uri, uri=True) as connection:
             tables = {
@@ -264,50 +364,59 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
             ).fetchone()
             if stored_hash is None or stored_hash[0] != config_hash:
                 return False
-            active_documents = connection.execute(
-                "SELECT COUNT(*) FROM documents "
-                "WHERE collection = ? AND active = 1",
-                (args.collection,),
-            ).fetchone()[0]
+            indexed_documents = {
+                retrieval_benchmark._canonical_document_path(path): content_hash
+                for path, content_hash in connection.execute(
+                    "SELECT path, hash FROM documents "
+                    "WHERE collection = ? AND active = 1",
+                    (args.collection,),
+                )
+            }
+            if indexed_documents != expected_documents:
+                return False
+            vector_columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(content_vectors)")
+            }
+            if not {"seq", "embed_fingerprint"}.issubset(vector_columns):
+                return False
             covered_documents = connection.execute(
-                "SELECT COUNT(*) "
-                "FROM documents AS d "
+                "SELECT COUNT(*) FROM documents AS d "
                 "WHERE d.collection = ? AND d.active = 1 "
                 "AND EXISTS ("
                 "SELECT 1 FROM content_vectors AS cv "
                 "WHERE cv.hash = d.hash AND cv.model = ? "
-                "GROUP BY cv.hash, cv.model "
+                "AND cv.embed_fingerprint <> '' "
+                "GROUP BY cv.hash, cv.model, cv.embed_fingerprint "
                 "HAVING COUNT(*) = MAX(cv.total_chunks) "
                 "AND MAX(cv.total_chunks) > 0"
                 ")",
                 (args.collection, args.retrieval_model_id),
             ).fetchone()[0]
-            content_vector_rows = connection.execute(
-                "SELECT COUNT(*) "
-                "FROM content_vectors AS cv "
-                "WHERE cv.model = ? AND EXISTS ("
+            fingerprints = connection.execute(
+                "SELECT COUNT(DISTINCT cv.embed_fingerprint) "
+                "FROM content_vectors AS cv WHERE cv.model = ? AND EXISTS ("
                 "SELECT 1 FROM documents AS d WHERE d.hash = cv.hash "
                 "AND d.collection = ? AND d.active = 1"
                 ")",
                 (args.retrieval_model_id, args.collection),
             ).fetchone()[0]
-            vector_rows = connection.execute(
-                "SELECT COUNT(*) FROM vectors_vec_rowids AS vr WHERE EXISTS ("
-                "SELECT 1 FROM documents AS d "
-                "JOIN content_vectors AS cv ON cv.hash = d.hash "
+            missing_vectors = connection.execute(
+                "SELECT COUNT(*) FROM content_vectors AS cv "
+                "JOIN documents AS d ON d.hash = cv.hash "
+                "LEFT JOIN vectors_vec_rowids AS vr "
+                "ON vr.id = cv.hash || '_' || cv.seq "
                 "WHERE d.collection = ? AND d.active = 1 AND cv.model = ? "
-                "AND SUBSTR(vr.id, 1, LENGTH(d.hash)) = d.hash "
-                "AND SUBSTR(vr.id, LENGTH(d.hash) + 1, 1) IN ('_', ':')"
-                ")",
+                "AND vr.id IS NULL",
                 (args.collection, args.retrieval_model_id),
             ).fetchone()[0]
     except (OSError, sqlite3.Error, TypeError, ValueError):
         return False
     return (
-        active_documents > 0
-        and covered_documents == active_documents
-        and content_vector_rows > 0
-        and vector_rows == content_vector_rows
+        bool(expected_documents)
+        and covered_documents == len(expected_documents)
+        and fingerprints == 1
+        and missing_vectors == 0
     )
 
 
@@ -362,6 +471,28 @@ def validate_private_workbook(payload: dict) -> None:
             "Private benchmark judgments are invalid: "
             f"{invalid_judgments} invalid record(s)"
         )
+
+
+def _private_paths_are_vault_local(args) -> bool:
+    try:
+        workspace = args.queries.resolve().parent
+        if tuple(part.casefold() for part in workspace.parts[-4:]) != (
+            ".glassgraph",
+            "benchmarks",
+            "private",
+            "v1",
+        ):
+            return False
+        if str(workspace.anchor).startswith("\\\\"):
+            return False
+        vault_root = workspace.parents[3]
+        args.benchmark_corpus_root.resolve().relative_to(vault_root)
+        args.output.resolve().relative_to(workspace)
+        if any((path / ".git").exists() for path in (vault_root, *vault_root.parents)):
+            return False
+    except (IndexError, OSError, ValueError):
+        return False
+    return True
 
 
 def validate_records(records: list[dict]) -> None:
@@ -545,6 +676,11 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     if args.privacy == "private":
         if args.split is None or args.output is None:
             parser.error("Private benchmarks require --split and --output")
+        if not _private_paths_are_vault_local(args):
+            parser.error(
+                "Private benchmark inputs and reports must stay in the "
+                "vault-side private workspace"
+            )
         if args.queries.resolve() == args.output.resolve():
             parser.error("The private report path must differ from the workbook path")
         if args.output.exists():
@@ -612,6 +748,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         parser.error(
             "GrooveSeek benchmarks require --groove-config and "
             "a model-cache directory"
+        )
+    if args.backend == "grooveseek" and not _groove_index_is_ready(args):
+        parser.error(
+            "The GrooveSeek benchmark index does not match the frozen corpus"
         )
     if args.backend == "qmd" and (
         args.qmd_config is None
