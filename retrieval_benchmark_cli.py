@@ -143,10 +143,22 @@ def validate_records(records: list[dict]) -> None:
     for record in records:
         groups = record.get("required_groups")
         irrelevant = record.get("irrelevant")
+        relevant_ids = {
+            judgment.get("evidence_id")
+            for group in groups or []
+            for judgment in group
+            if isinstance(judgment, dict)
+        }
+        irrelevant_ids = {
+            judgment.get("evidence_id")
+            for judgment in irrelevant or []
+            if isinstance(judgment, dict)
+        }
         valid = (
             isinstance(record.get("query"), str)
             and bool(record["query"].strip())
             and isinstance(groups, list)
+            and relevant_ids.isdisjoint(irrelevant_ids)
             and (
                 (
                     not groups
@@ -323,6 +335,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             parser.error(
                 "Public reports require at least five positive and five negative queries"
             )
+    queries = sorted(queries, key=lambda record: record["id"])
 
     if args.backend == "grooveseek":
         adapter = retrieval_backends.GrooveSeekAdapter(

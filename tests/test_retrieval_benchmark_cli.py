@@ -236,6 +236,16 @@ def test_validate_records_rejects_relevant_judgment_on_negative_query(
         retrieval_benchmark_cli_mod.validate_records([record])
 
 
+def test_validate_records_rejects_contradictory_evidence_grades(
+    retrieval_benchmark_cli_mod,
+):
+    record = _public_queries()[0]
+    record["irrelevant"][0]["evidence_id"] = PUBLIC_ANSWER_ID
+
+    with pytest.raises(ValueError, match="invalid"):
+        retrieval_benchmark_cli_mod.validate_records([record])
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
@@ -396,6 +406,59 @@ def test_public_cli_prints_aggregate_only(
     assert payload["measurements"]["offline_verified"] is True
     assert "PRIVATE QUERY TEXT" not in output
     assert "answer.md" not in output
+
+
+def test_public_cli_executes_queries_in_canonical_id_order(
+    tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    queries = list(reversed(_public_queries()))
+    corpus_root = _write_corpus(tmp_path)
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(
+        json.dumps(
+            _add_manifest(
+                {"schema_version": 1, "queries": queries},
+                queries,
+                retrieval_benchmark_mod,
+                {"public": [item["id"] for item in queries]},
+                corpus_root,
+            )
+        ),
+        encoding="utf-8",
+    )
+    executed_queries = []
+
+    def run_process(args, _environment):
+        executed_queries.append(args[2])
+        return {
+            "stdout": json.dumps({"results": [], "low_confidence": False}),
+            "elapsed_ms": 1.0,
+            "peak_working_set_bytes": 1000,
+        }
+
+    retrieval_benchmark_cli_mod.main(
+        [
+            "--queries",
+            str(queries_path),
+            "--backend",
+            "grooveseek",
+            "--groove-executable",
+            "groove",
+            "--knowledge-base",
+            "corpus",
+            "--privacy",
+            "public",
+            "--benchmark-corpus-root",
+            str(corpus_root),
+            *MEASUREMENT_ARGS,
+        ],
+        process_runner=run_process,
+        token_counter=lambda _text: 0,
+    )
+
+    assert executed_queries == [
+        record["query"] for record in sorted(queries, key=lambda item: item["id"])
+    ]
 
 
 def test_private_cli_filters_split_and_writes_report_without_stdout(

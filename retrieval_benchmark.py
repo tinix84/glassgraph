@@ -10,7 +10,7 @@ import unicodedata
 from pathlib import Path, PurePosixPath
 
 
-ATX_HEADING = re.compile(r"^[ ]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*$")
+ATX_HEADING = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$")
 FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,}).*$")
 
 
@@ -153,7 +153,9 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         match = ATX_HEADING.match(source_line)
         if match:
             level = len(match.group(1))
-            title = unicodedata.normalize("NFC", match.group(2))
+            raw_title = match.group(2) or ""
+            raw_title = re.sub(r"[ \t]+#+[ \t]*$", "", raw_title)
+            title = unicodedata.normalize("NFC", raw_title.strip(" \t"))
             while stack and stack[-1]["level"] >= level:
                 stack.pop()
             parent_id = stack[-1]["id"] if stack else None
@@ -310,7 +312,7 @@ def derive_evidence_records(
         )
         occurrence_end = occurrence + len(occurrence_passage)
         if occurrence_end > heading["end"]:
-            start = occurrence + len(passage)
+            start = occurrence + 1
             continue
         ordinal_key = (heading["id"], passage_hash)
         passage_ordinal = ordinals.get(ordinal_key, 0)
@@ -350,7 +352,7 @@ def derive_evidence_records(
                 ),
             }
         )
-        start = occurrence + len(passage)
+        start = occurrence + 1
     return records
 
 
@@ -502,7 +504,7 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
 
 
-def _has_explanation(hit: dict) -> bool:
+def _has_explanation_trace(hit: dict) -> bool:
     explanation = hit.get("explanation")
     if not isinstance(explanation, dict):
         return False
@@ -530,6 +532,28 @@ def _has_explanation(hit: dict) -> bool:
     return False
 
 
+def _has_faithful_explanation(hit: dict, query_text: str) -> bool:
+    """Return whether a trace can be verified against the query and returned text."""
+    if not _has_explanation_trace(hit):
+        return False
+    explanation = hit["explanation"]
+    if explanation["kind"] != "match_spans":
+        return False
+    normalized_query = unicodedata.normalize("NFC", query_text).casefold()
+    if not normalized_query.strip():
+        return False
+    text_bytes = str(hit.get("text") or "").encode("utf-8")
+    for span in explanation["value"]:
+        try:
+            matched_text = text_bytes[span["start"] : span["end"]].decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        normalized_match = unicodedata.normalize("NFC", matched_text).casefold().strip()
+        if not normalized_match or normalized_match not in normalized_query:
+            return False
+    return True
+
+
 def _is_meaningful_explanation_value(value) -> bool:
     if value is None:
         return False
@@ -553,6 +577,7 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
     exact_evidence_hits = 0
     context_tokens_top_5 = []
     explained_hits_top_5 = []
+    faithful_explanations_top_5 = []
     top_5_hit_count = 0
     for query in queries:
         run = runs.get(query["id"], {"hits": []})
@@ -566,7 +591,13 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
             sum(hit.get("context_tokens", 0) for hit in raw_hits[:5])
         )
         explained_hits_top_5.append(
-            sum(_has_explanation(hit) for hit in raw_hits[:5])
+            sum(_has_explanation_trace(hit) for hit in raw_hits[:5])
+        )
+        faithful_explanations_top_5.append(
+            sum(
+                _has_faithful_explanation(hit, str(query.get("query") or ""))
+                for hit in raw_hits[:5]
+            )
         )
         top_5_hit_count += len(raw_hits[:5])
         groups = query.get("required_groups", [])
@@ -635,7 +666,12 @@ def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:
         "mean_explained_hits_top_5": (
             statistics.mean(explained_hits_top_5) if explained_hits_top_5 else 0.0
         ),
-        "explanation_fidelity_rate_top_5": (
+        "explanation_trace_availability_rate_top_5": (
             sum(explained_hits_top_5) / top_5_hit_count if top_5_hit_count else 0.0
+        ),
+        "explanation_fidelity_rate_top_5": (
+            sum(faithful_explanations_top_5) / top_5_hit_count
+            if top_5_hit_count
+            else 0.0
         ),
     }

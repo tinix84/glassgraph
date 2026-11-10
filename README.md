@@ -92,6 +92,8 @@ The private command writes its aggregate report to a new local file. It prints n
 
 Positive retrieval metrics use ranked raw hits. Negative false-positive metrics use accepted hits after backend confidence abstention. The report also keeps the raw negative false-positive rate so that confidence behavior is visible.
 
+Explanation trace availability reports whether a backend returned a structurally valid trace. Explanation fidelity is stricter. It verifies that each GrooveSeek match span names text from the query. QMD score traces count as available, but not as independently verified fidelity.
+
 ## Architecture
 
 ```

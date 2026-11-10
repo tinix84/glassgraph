@@ -141,8 +141,8 @@ def test_evaluate_reports_exact_evidence_span_accuracy(retrieval_benchmark_mod):
 
 def test_evaluate_reports_context_and_explanation_density(retrieval_benchmark_mod):
     queries = [
-        {"id": "n1", "required_groups": []},
-        {"id": "n2", "required_groups": []},
+        {"id": "n1", "query": "A", "required_groups": []},
+        {"id": "n2", "query": "C", "required_groups": []},
     ]
     runs = {
         "n1": {
@@ -162,7 +162,8 @@ def test_evaluate_reports_context_and_explanation_density(retrieval_benchmark_mo
 
     assert report["mean_context_tokens_top_5"] == 30.0
     assert report["mean_explained_hits_top_5"] == 1.0
-    assert report["explanation_fidelity_rate_top_5"] == pytest.approx(2 / 3)
+    assert report["explanation_trace_availability_rate_top_5"] == pytest.approx(2 / 3)
+    assert report["explanation_fidelity_rate_top_5"] == pytest.approx(1 / 3)
 
 
 def test_evaluate_finds_exact_passage_inside_returned_chunk(retrieval_benchmark_mod):
@@ -345,7 +346,7 @@ def test_evaluate_rejects_ambiguous_unverified_duplicate_passage(
 
 
 def test_evaluate_counts_only_nonempty_explanation_traces(retrieval_benchmark_mod):
-    queries = [{"id": "n1", "required_groups": []}]
+    queries = [{"id": "n1", "query": "A", "required_groups": []}]
     runs = {
         "n1": {
             "hits": [
@@ -362,7 +363,31 @@ def test_evaluate_counts_only_nonempty_explanation_traces(retrieval_benchmark_mo
     report = retrieval_benchmark_mod.evaluate(queries, runs)
 
     assert report["mean_explained_hits_top_5"] == 1.0
-    assert report["explanation_fidelity_rate_top_5"] == 0.2
+    assert report["explanation_trace_availability_rate_top_5"] == 0.2
+    assert report["explanation_fidelity_rate_top_5"] == 0.0
+
+
+def test_evaluate_rejects_unrelated_match_span_as_faithful_explanation(
+    retrieval_benchmark_mod,
+):
+    queries = [{"id": "n1", "query": "target", "required_groups": []}]
+    runs = {
+        "n1": {
+            "hits": [{
+                "path": "a.md",
+                "text": "unrelated",
+                "explanation": {
+                    "kind": "match_spans",
+                    "value": [{"start": 0, "end": 1}],
+                },
+            }]
+        }
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
+    assert report["explanation_trace_availability_rate_top_5"] == 1.0
+    assert report["explanation_fidelity_rate_top_5"] == 0.0
 
 
 def test_verify_evidence_hits_rejects_unjudged_duplicate_occurrence(
@@ -569,6 +594,21 @@ def test_derive_evidence_byte_span_covers_reordered_combining_sequence(
     assert records[0]["utf8_byte_end"] == len(combining_sequence.encode("utf-8"))
 
 
+def test_derive_evidence_counts_overlapping_identical_passages(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_bytes(b"# Result\n\naaaa")
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "aaa"},
+    )
+
+    assert [record["utf8_byte_start"] for record in records] == [10, 11]
+    assert [record["utf8_byte_end"] for record in records] == [13, 14]
+    assert len({record["evidence_id"] for record in records}) == 2
+
+
 @pytest.mark.parametrize("unsafe_path", ["D:wiki/example.md", "./D:/wiki/example.md"])
 def test_derive_evidence_rejects_drive_relative_paths(
     tmp_path, retrieval_benchmark_mod, unsafe_path
@@ -600,6 +640,27 @@ def test_derive_evidence_ignores_frontmatter_and_fenced_code_headings(
 
     assert frontmatter[0]["heading_path"] == []
     assert body[0]["heading_path"] == ["Real Heading"]
+
+
+def test_derive_evidence_normalizes_empty_and_closed_atx_headings(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "##\nEmpty heading evidence.\n\n## Results ##\nClosed heading evidence.\n",
+        encoding="utf-8",
+    )
+
+    empty = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Empty heading evidence."},
+    )
+    closed = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Closed heading evidence."},
+    )
+
+    assert empty[0]["heading_path"] == [""]
+    assert closed[0]["heading_path"] == ["Results"]
 
 
 def test_verify_evidence_rejects_longer_line_with_judged_prefix(
