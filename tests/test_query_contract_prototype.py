@@ -59,10 +59,16 @@ wrongLocator.results[0].backend_trace.source_document_hash = 'sha256:' + '0'.rep
 const locatorRejected = QueryContract.verify(wrongLocator);
 if (locatorRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong locator was certified');
 
+const wrongSnapshot = QueryContract.execute('groove', 'fresh', 'search');
+wrongSnapshot.index.corpus_snapshot_hash = 'sha256:' + '0'.repeat(64);
+const snapshotRejected = QueryContract.verify(wrongSnapshot);
+if (snapshotRejected.results[0].evidence.evidence_id !== null) throw new Error('wrong corpus snapshot was certified');
+
 const staleExplain = QueryContract.execute('groove', 'stale', 'explain');
 if (staleExplain.results.some(result => (result.evidence_ids || []).length)) throw new Error('stale explain exposed evidence ID');
 const freshExplain = QueryContract.execute('groove', 'fresh', 'explain');
 if (freshExplain.results.some(result => (result.evidence_ids || []).length)) throw new Error('unverified explain exposed evidence ID');
+if (freshExplain.results[0].trace.some(stage => stage.stage === 'compiler_verification' && /checked|verified/i.test(stage.detail))) throw new Error('standalone explain claimed verification');
 
 const typedPath = QueryContract.execute('groove', 'fresh', 'path');
 const edge = typedPath.results[0].steps.find(step => step.kind === 'edge').edge;

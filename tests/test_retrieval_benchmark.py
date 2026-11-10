@@ -332,6 +332,8 @@ def test_evaluate_counts_only_nonempty_explanation_traces(retrieval_benchmark_mo
                 {"path": "b.md", "text": "B", "explanation": {"kind": "score", "value": None}},
                 {"path": "c.md", "text": "C", "explanation": {"kind": "qmd_explain", "value": {"blendedScore": 1}}},
                 {"path": "d.md", "text": "D", "explanation": {"kind": "unrelated", "value": {"score": 1}}},
+                {"path": "e.md", "text": "E", "explanation": {"kind": "match_spans", "value": [{"start": 99, "end": 100}]}},
+                {"path": "f.md", "text": "F", "explanation": {"kind": "qmd_explain", "value": {"lex": []}}},
             ]
         }
     }
@@ -339,7 +341,7 @@ def test_evaluate_counts_only_nonempty_explanation_traces(retrieval_benchmark_mo
     report = retrieval_benchmark_mod.evaluate(queries, runs)
 
     assert report["mean_explained_hits_top_5"] == 1.0
-    assert report["explanation_fidelity_rate_top_5"] == 0.25
+    assert report["explanation_fidelity_rate_top_5"] == 0.2
 
 
 def test_verify_evidence_hits_rejects_unjudged_duplicate_occurrence(
@@ -374,15 +376,18 @@ def test_verify_evidence_hits_certifies_unique_source_occurrence(
     tmp_path, retrieval_benchmark_mod
 ):
     (tmp_path / "answer.md").write_text("Unique answer.\n", encoding="utf-8")
+    judgment = {
+        "path": "answer.md",
+        "text": "Unique answer.",
+        "grade": "direct",
+    }
+    judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path, judgment
+    )[0]["evidence_id"]
     queries = [
         {
             "id": "q1",
-            "required_groups": [[{
-                "evidence_id": "unique-id",
-                "path": "answer.md",
-                "text": "Unique answer.",
-                "grade": "direct",
-            }]],
+            "required_groups": [[judgment]],
         }
     ]
     runs = {"q1": {"hits": [{"path": "answer.md", "text": "Unique answer."}]}}
@@ -390,5 +395,71 @@ def test_verify_evidence_hits_certifies_unique_source_occurrence(
     retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
     report = retrieval_benchmark_mod.evaluate(queries, runs)
 
-    assert runs["q1"]["hits"][0]["evidence_ids"] == ["unique-id"]
+    assert runs["q1"]["hits"][0]["evidence_ids"] == [judgment["evidence_id"]]
     assert report["group_recall_at_5"] == 1.0
+
+
+def test_validate_evidence_judgments_rejects_wrong_adr_0013_id(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text("# Answer\n\nUnique answer.\n", encoding="utf-8")
+    queries = [{
+        "id": "q1",
+        "required_groups": [[{
+            "evidence_id": "sha256:" + "0" * 64,
+            "path": "answer.md",
+            "heading": "Answer",
+            "text": "Unique answer.",
+            "grade": "direct",
+        }]],
+    }]
+
+    with pytest.raises(ValueError, match="evidence identity"):
+        retrieval_benchmark_mod.validate_evidence_judgments(queries, tmp_path)
+
+
+def test_benchmark_version_changes_with_judgment_correction(retrieval_benchmark_mod):
+    original = [{"id": "q1", "required_groups": []}]
+    corrected = [{
+        "id": "q1",
+        "required_groups": [],
+        "irrelevant": [{"evidence_id": "sha256:" + "1" * 64}],
+    }]
+
+    original_version = retrieval_benchmark_mod.benchmark_version("public", original)
+    corrected_version = retrieval_benchmark_mod.benchmark_version("public", corrected)
+
+    assert original_version.startswith("public-v1-")
+    assert corrected_version.startswith("public-v1-")
+    assert corrected_version != original_version
+
+
+def test_verify_evidence_hits_uses_line_locator_for_repeated_passage(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# First\n\nRepeated answer.\n\n# Second\n\nRepeated answer.\n",
+        encoding="utf-8",
+    )
+    judgment = {
+        "path": "answer.md",
+        "heading": "Second",
+        "text": "Repeated answer.",
+        "grade": "direct",
+    }
+    records = retrieval_benchmark_mod.derive_evidence_records(tmp_path, judgment)
+    judgment["evidence_id"] = records[1]["evidence_id"]
+    queries = [{"id": "q1", "required_groups": [[judgment]]}]
+    runs = {
+        "q1": {
+            "hits": [{
+                "path": "answer.md",
+                "text": "Repeated answer.",
+                "backend_locator": {"kind": "heuristic_line", "line": 7},
+            }]
+        }
+    }
+
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert runs["q1"]["hits"][0]["evidence_ids"] == [judgment["evidence_id"]]

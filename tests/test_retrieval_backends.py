@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 
 import pytest
 
@@ -168,3 +169,7 @@ def test_qmd_adapter_redacts_result_paths_outside_corpus(
 
     assert str(error.value) == "QMD returned a result outside the benchmark corpus"
     assert str(private_path) not in str(error.value)
+    formatted = "".join(
+        traceback.format_exception(type(error.value), error.value, error.value.__traceback__)
+    )
+    assert str(private_path) not in formatted

@@ -24,6 +24,11 @@ MEASUREMENT_ARGS = [
     "--offline-verified",
 ]
 
+PUBLIC_ANSWER_ID = "sha256:49f9bfe7dce9a5f1e1c2060cf8d021f034f319ceac3cd88ddf81b0cff9bf4ebf"
+PUBLIC_IRRELEVANT_ID = "sha256:9eef3057700ae1a5c20ebb04e80930ffb1171e72b51a1723dbf2561dd0731725"
+PRIVATE_ANSWER_ID = "sha256:ed02295cc9e18510c12565faf6b59374d3fdda301a092ff6d49743eeb1c5f35a"
+PRIVATE_IRRELEVANT_ID = "sha256:c9870737134c02427c7619a41c77e35fba8605c48340d2201327515c7a639b52"
+
 
 def _evidence_id(seed):
     return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
@@ -46,11 +51,17 @@ def _public_queries():
             "id": f"p{index}",
             "query": f"PRIVATE QUERY TEXT {index}",
             "required_groups": [[{
-                "evidence_id": _evidence_id("answer"),
+                "evidence_id": PUBLIC_ANSWER_ID,
                 "path": "answer.md",
                 "text": "Exact answer passage.",
                 "grade": "direct",
             }]],
+            "irrelevant": [{
+                "evidence_id": PUBLIC_IRRELEVANT_ID,
+                "path": "answer.md",
+                "text": "Exact answer.",
+                "grade": "irrelevant",
+            }],
         }
         for index in range(1, 6)
     ]
@@ -80,11 +91,17 @@ def _private_records():
                     "type": "exact",
                     "query": f"{split} private positive {index}",
                     "required_groups": [[{
-                        "evidence_id": _evidence_id(f"{short}-p{index:02d}"),
+                        "evidence_id": PRIVATE_ANSWER_ID,
                         "path": "wiki/answer.md",
                         "text": "Exact answer.",
                         "grade": "direct",
                     }]],
+                    "irrelevant": [{
+                        "evidence_id": PRIVATE_IRRELEVANT_ID,
+                        "path": "wiki/answer.md",
+                        "text": "Exact answer passage.",
+                        "grade": "irrelevant",
+                    }],
                     "adjudication_note": "",
                     "owner_authored": True,
                     "owner_adjudicated": True,
@@ -132,6 +149,10 @@ def _add_manifest(
     split_membership,
     corpus_root,
 ):
+    privacy = "private" if "records" in payload else "public"
+    payload["benchmark_version"] = retrieval_benchmark_mod.benchmark_version(
+        privacy, records
+    )
     payload["manifest"] = _manifest(
         records,
         retrieval_benchmark_mod,
@@ -139,6 +160,126 @@ def _add_manifest(
         corpus_root,
     )
     return payload
+
+
+@pytest.mark.parametrize(
+    ("payload_schema", "manifest_schema"),
+    [(None, None), (2, 2), (1, 2)],
+)
+def test_cli_requires_schema_version_one(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    payload_schema,
+    manifest_schema,
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        corpus_root,
+    )
+    if payload_schema is None:
+        payload.pop("schema_version")
+    else:
+        payload["schema_version"] = payload_schema
+    if manifest_schema is None:
+        payload["manifest"].pop("schema_version")
+    else:
+        payload["manifest"]["schema_version"] = manifest_schema
+    queries_path = tmp_path / "schema.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "grooveseek",
+                "--groove-executable", "groove",
+                "--knowledge-base", "corpus",
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+def test_validate_records_requires_explicit_irrelevant_judgment_for_positive(
+    retrieval_benchmark_cli_mod,
+):
+    record = _public_queries()[0]
+    record.pop("irrelevant")
+
+    with pytest.raises(ValueError, match="invalid"):
+        retrieval_benchmark_cli_mod.validate_records([record])
+
+
+def test_cli_rejects_stale_benchmark_version(
+    tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        corpus_root,
+    )
+    payload["benchmark_version"] = "public-v1-stale"
+    queries_path = tmp_path / "stale-version.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "grooveseek",
+                "--groove-executable", "groove",
+                "--knowledge-base", "corpus",
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+
+
+def test_cli_rejects_result_limit_below_reported_cutoffs(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries_path = tmp_path / "unused.json"
+    queries_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "grooveseek",
+                "--groove-executable", "groove",
+                "--knowledge-base", "corpus",
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                "--limit", "9",
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 1,
+        )
+
+    assert error.value.code == 2
+    assert "at least 10" in capsys.readouterr().err
 
 
 def _private_args(workbook_path, output_path, corpus_root):
@@ -375,6 +516,56 @@ def test_public_cli_runs_qmd_adapter(
     assert exit_code == 0
     assert payload["backend"] == "qmd"
     assert payload["summary"]["group_recall_at_5"] == 1.0
+
+
+def test_cli_redacts_qmd_out_of_corpus_path(
+    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+):
+    corpus_root = _write_corpus(tmp_path)
+    queries = _public_queries()
+    payload = _add_manifest(
+        {"schema_version": 1, "queries": queries},
+        queries,
+        retrieval_benchmark_mod,
+        {"public": [query["id"] for query in queries]},
+        corpus_root,
+    )
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(json.dumps(payload), encoding="utf-8")
+    private_path = tmp_path.parent / "private-vault" / "secret.md"
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries", str(queries_path),
+                "--backend", "qmd",
+                "--node-executable", "node",
+                "--qmd-script", "qmd",
+                "--index", "glassgraph-test",
+                "--collection", "glassgraph-test",
+                "--corpus-root", str(corpus_root),
+                "--privacy", "public",
+                "--benchmark-corpus-root", str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: {
+                "stdout": json.dumps([{
+                    "score": 1.0,
+                    "file": str(private_path),
+                    "line": 1,
+                    "snippet": "private",
+                    "explain": {"blendedScore": 1.0},
+                }]),
+                "elapsed_ms": 1,
+                "peak_working_set_bytes": 1,
+            },
+            token_counter=lambda _text: 1,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(private_path) not in stderr
+    assert "Retrieval backend execution failed" in stderr
 
 
 def test_load_token_counter_uses_pinned_tokenizer_file(

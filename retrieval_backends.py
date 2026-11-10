@@ -180,10 +180,10 @@ class QmdAdapter:
                     .relative_to(self.corpus_root)
                     .as_posix()
                 )
-            except ValueError as error:
+            except ValueError:
                 raise RuntimeError(
                     "QMD returned a result outside the benchmark corpus"
-                ) from error
+                ) from None
             path = _with_prefix(relative_path, self.path_prefix)
             raw_hits.append(
                 {

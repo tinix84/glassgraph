@@ -80,7 +80,9 @@ python retrieval_benchmark_cli.py `
   --offline-verified
 ```
 
-The query file contains the frozen manifest and evidence IDs. The command verifies the corpus bytes and rejects stale manifest hashes or split maps.
+The query file contains the frozen manifest and ADR-0013 evidence IDs. Each positive record keeps required `direct` or `supporting` judgments separate from an explicit nonempty `irrelevant` list. The command derives every identity again from the frozen Markdown, verifies the corpus bytes, and rejects stale manifest hashes or split maps.
+
+Benchmark versions are content-addressed as `public-v1-<judgment-hash>` or `private-v1-<judgment-hash>`. Correcting a judgment therefore requires a new version. Result limits below 10 are rejected because the report publishes Recall@10 and nDCG@10.
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 

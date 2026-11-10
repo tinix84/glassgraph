@@ -18,6 +18,39 @@ import retrieval_benchmark
 SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
+def _valid_judgment(passage: object, grades: set[str]) -> bool:
+    return (
+        isinstance(passage, dict)
+        and bool(SHA256_PATTERN.fullmatch(str(passage.get("evidence_id") or "")))
+        and isinstance(passage.get("path"), str)
+        and bool(passage["path"])
+        and isinstance(passage.get("text"), str)
+        and bool(passage["text"])
+        and passage.get("grade") in grades
+    )
+
+
+def _valid_required_groups(groups: object) -> bool:
+    return (
+        isinstance(groups, list)
+        and bool(groups)
+        and all(isinstance(group, list) and bool(group) for group in groups)
+        and all(
+            _valid_judgment(passage, {"direct", "supporting"})
+            for group in groups
+            for passage in group
+        )
+    )
+
+
+def _valid_irrelevant_judgments(judgments: object) -> bool:
+    return (
+        isinstance(judgments, list)
+        and bool(judgments)
+        and all(_valid_judgment(passage, {"irrelevant"}) for passage in judgments)
+    )
+
+
 def load_token_counter(path: Path):
     """Load one pinned tokenizer and return a text-to-token-count function."""
     tokenizer = Tokenizer.from_file(str(path))
@@ -62,20 +95,10 @@ def validate_private_workbook(payload: dict) -> None:
     invalid_judgments = 0
     for record in records:
         groups = record.get("required_groups")
+        irrelevant = record.get("irrelevant")
         if record.get("kind") == "positive":
-            valid = (
-                isinstance(groups, list)
-                and bool(groups)
-                and all(isinstance(group, list) and bool(group) for group in groups)
-                and all(
-                    isinstance(passage, dict)
-                    and passage.get("evidence_id")
-                    and passage.get("path")
-                    and passage.get("text")
-                    and passage.get("grade") in {"direct", "supporting"}
-                    for group in groups
-                    for passage in group
-                )
+            valid = _valid_required_groups(groups) and _valid_irrelevant_judgments(
+                irrelevant
             )
         else:
             valid = groups == [] and bool(record.get("adjudication_note"))
@@ -96,19 +119,17 @@ def validate_records(records: list[dict]) -> None:
     invalid_records = 0
     for record in records:
         groups = record.get("required_groups")
+        irrelevant = record.get("irrelevant")
         valid = (
             isinstance(record.get("query"), str)
             and bool(record["query"].strip())
             and isinstance(groups, list)
-            and all(isinstance(group, list) and bool(group) for group in groups)
-            and all(
-                isinstance(passage, dict)
-                and SHA256_PATTERN.fullmatch(str(passage.get("evidence_id") or ""))
-                and passage.get("path")
-                and passage.get("text")
-                and passage.get("grade") in {"direct", "supporting"}
-                for group in groups
-                for passage in group
+            and (
+                not groups
+                or (
+                    _valid_required_groups(groups)
+                    and _valid_irrelevant_judgments(irrelevant)
+                )
             )
         )
         invalid_records += not valid
@@ -127,11 +148,11 @@ def validate_manifest(
     manifest = payload.get("manifest")
     if not isinstance(manifest, dict):
         raise ValueError("The benchmark manifest is missing")
-    expected_version = "private-v1" if privacy == "private" else "public-v1"
+    expected_version = retrieval_benchmark.benchmark_version(privacy, records)
     if payload.get("benchmark_version") != expected_version:
         raise ValueError("The benchmark version is invalid")
-    if manifest.get("schema_version") != payload.get("schema_version"):
-        raise ValueError("The benchmark manifest schema version does not match")
+    if payload.get("schema_version") != 1 or manifest.get("schema_version") != 1:
+        raise ValueError("The benchmark schema version must be 1")
     if not SHA256_PATTERN.fullmatch(str(manifest.get("corpus_snapshot_hash") or "")):
         raise ValueError("The benchmark corpus snapshot hash is invalid")
     try:
@@ -202,8 +223,8 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         or args.derived_index_size_bytes <= 0
     ):
         parser.error("Benchmark measurements must be nonnegative and index size must be positive")
-    if args.limit <= 0:
-        parser.error("The result limit must be positive")
+    if args.limit < 10:
+        parser.error("The result limit must be at least 10 for Recall@10 and nDCG@10")
     if args.privacy == "private":
         if args.split is None or args.output is None:
             parser.error("Private benchmarks require --split and --output")
@@ -231,6 +252,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             payload,
             records,
             args.privacy,
+            args.benchmark_corpus_root,
+        )
+        retrieval_benchmark.validate_evidence_judgments(
+            records,
             args.benchmark_corpus_root,
         )
     except ValueError as error:
@@ -268,10 +293,13 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             path_prefix=args.path_prefix,
         )
 
-    runs = {
-        query["id"]: adapter.query(query["query"], limit=args.limit)
-        for query in queries
-    }
+    try:
+        runs = {
+            query["id"]: adapter.query(query["query"], limit=args.limit)
+            for query in queries
+        }
+    except RuntimeError:
+        parser.error("Retrieval backend execution failed")
     try:
         retrieval_benchmark.verify_evidence_hits(
             queries,

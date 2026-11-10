@@ -96,6 +96,7 @@
       };
 
       const verifiedEvidence = {
+        corpus_snapshot_hash:IDS.corpus,
         path:'wiki/example.md',
         passage:'Efficiency is 98%.\n',
         locator:{ path:'wiki/example.md', heading_path:['Results'], lines:{ start:8, end:8 }, utf8_bytes:{ start:55, end:74 } },
@@ -169,8 +170,8 @@
         }
         return { result_id:'result:1', kind:'explanation', rank:1, trace:[
           { stage:'backend_candidate', detail:'Raw adapter score and locator preserved.' },
-          { stage:'compiler_verification', detail:indexState === 'fresh' ? 'Exact passage and source hash checked against the evidence table.' : 'Verification refused because the index is stale.' },
-          { stage:'contract_result', detail:'Evidence ID emitted only after verification.' }
+          { stage:'compiler_verification', detail:indexState === 'fresh' ? 'Not run: explain needs a referenced result before evidence verification.' : 'Not run: verification is unavailable while the index is stale.' },
+          { stage:'contract_result', detail:'No evidence ID emitted without a verified referenced result.' }
         ], evidence_ids:[], score:null };
       }
 
@@ -202,6 +203,11 @@
         if (next.index.state !== 'fresh') {
           hit.evidence = { status:'stale', evidence_id:null, locator:null, verification_error:'source_hash_mismatch' };
           next.status = 'stale';
+          return next;
+        }
+        if (next.index.corpus_snapshot_hash !== verifiedEvidence.corpus_snapshot_hash) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'corpus_snapshot_mismatch' };
+          next.status = 'rejected';
           return next;
         }
         const trace = hit.backend_trace;

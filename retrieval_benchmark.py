@@ -4,9 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import statistics
 import unicodedata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+
+ATX_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
 
 
 def _canonical_hash(domain: str, payload) -> str:
@@ -36,6 +40,7 @@ def judgment_set_hash(records: list[dict]) -> str:
     fields = (
         "id",
         "required_groups",
+        "irrelevant",
         "adjudication_note",
         "owner_adjudicated",
         "adjudicated_by",
@@ -46,6 +51,14 @@ def judgment_set_hash(records: list[dict]) -> str:
         for record in sorted(records, key=lambda item: item["id"])
     ]
     return _canonical_hash("glassgraph:benchmark-judgments:v1", payload)
+
+
+def benchmark_version(privacy: str, records: list[dict]) -> str:
+    """Return a content-addressed benchmark version for one judgment set."""
+    if privacy not in {"public", "private"}:
+        raise ValueError("Benchmark privacy must be public or private")
+    digest = judgment_set_hash(records).removeprefix("sha256:")
+    return f"{privacy}-v1-{digest[:12]}"
 
 
 def corpus_snapshot_hash(corpus_root: str | Path) -> str:
@@ -70,16 +83,184 @@ def corpus_snapshot_hash(corpus_root: str | Path) -> str:
     return _canonical_hash("glassgraph:benchmark-corpus:v1", documents)
 
 
+def _canonical_document_path(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", str(value).replace("\\", "/"))
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("Evidence judgment path is outside the corpus")
+    parts = [part for part in path.parts if part not in {"", "."}]
+    if not parts:
+        raise ValueError("Evidence judgment path is empty")
+    return "/".join(parts)
+
+
+def _heading_instances(text: str, document_id: str) -> list[dict]:
+    root = {
+        "id": _canonical_hash(
+            "glassgraph:heading:v1",
+            {
+                "document_id": document_id,
+                "level": 0,
+                "parent_id": None,
+                "same_name_ordinal": 0,
+                "title": "",
+            },
+        ),
+        "level": 0,
+        "title": "",
+        "start": 0,
+        "line": 1,
+        "path": [],
+    }
+    headings = [root]
+    stack = []
+    sibling_counts = {}
+    offset = 0
+    for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
+        match = ATX_HEADING.match(line.rstrip("\n"))
+        if match:
+            level = len(match.group(1))
+            title = unicodedata.normalize("NFC", match.group(2))
+            while stack and stack[-1]["level"] >= level:
+                stack.pop()
+            parent_id = stack[-1]["id"] if stack else None
+            key = (parent_id, level, title)
+            ordinal = sibling_counts.get(key, 0)
+            sibling_counts[key] = ordinal + 1
+            heading = {
+                "id": _canonical_hash(
+                    "glassgraph:heading:v1",
+                    {
+                        "document_id": document_id,
+                        "level": level,
+                        "parent_id": parent_id,
+                        "same_name_ordinal": ordinal,
+                        "title": title,
+                    },
+                ),
+                "level": level,
+                "title": title,
+                "start": offset,
+                "line": line_number,
+                "path": [item["title"] for item in stack] + [title],
+            }
+            headings.append(heading)
+            stack.append(heading)
+        offset += len(line)
+    return headings
+
+
+def derive_evidence_records(
+    corpus_root: str | Path,
+    judgment: dict,
+) -> list[dict]:
+    """Derive every ADR-0013 identity for an exact judged passage occurrence."""
+    root = Path(corpus_root).resolve()
+    canonical_path = _canonical_document_path(judgment["path"])
+    source_path = (root / Path(*PurePosixPath(canonical_path).parts)).resolve()
+    try:
+        source_path.relative_to(root)
+    except ValueError as error:
+        raise ValueError("Evidence judgment path is outside the corpus") from error
+    source_bytes = source_path.read_bytes()
+    text = unicodedata.normalize(
+        "NFC",
+        source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"),
+    )
+    passage = unicodedata.normalize(
+        "NFC",
+        str(judgment["text"]).replace("\r\n", "\n").replace("\r", "\n"),
+    )
+    if not passage:
+        raise ValueError("Evidence judgment passage is empty")
+    if not passage.endswith("\n") and passage + "\n" in text:
+        passage += "\n"
+
+    document_id = _canonical_hash("glassgraph:document:v1", {"path": canonical_path})
+    headings = _heading_instances(text, document_id)
+    passage_hash = "sha256:" + hashlib.sha256(passage.encode("utf-8")).hexdigest()
+    source_hash = "sha256:" + hashlib.sha256(source_bytes).hexdigest()
+    records = []
+    start = 0
+    ordinals = {}
+    while True:
+        occurrence = text.find(passage, start)
+        if occurrence < 0:
+            break
+        heading = max(
+            (item for item in headings if item["start"] <= occurrence),
+            key=lambda item: item["start"],
+        )
+        ordinal_key = (heading["id"], passage_hash)
+        passage_ordinal = ordinals.get(ordinal_key, 0)
+        ordinals[ordinal_key] = passage_ordinal + 1
+        line_start = text.count("\n", 0, occurrence) + 1
+        line_end = line_start + passage.count("\n") - int(passage.endswith("\n"))
+        records.append(
+            {
+                "document_id": document_id,
+                "heading_id": heading["id"],
+                "evidence_id": _canonical_hash(
+                    "glassgraph:evidence:v1",
+                    {
+                        "document_id": document_id,
+                        "heading_id": heading["id"],
+                        "passage_hash": passage_hash,
+                        "passage_ordinal": passage_ordinal,
+                    },
+                ),
+                "passage_hash": passage_hash,
+                "source_hash": source_hash,
+                "path": canonical_path,
+                "heading": heading["title"],
+                "heading_path": heading["path"],
+                "line_start": line_start,
+                "line_end": max(line_start, line_end),
+            }
+        )
+        start = occurrence + max(1, len(passage))
+    return records
+
+
+def validate_evidence_judgments(records: list[dict], corpus_root: str | Path) -> None:
+    """Reject benchmark judgments that are not valid ADR-0013 evidence identities."""
+    for query in records:
+        judgments = _passages(query.get("required_groups", []))
+        judgments.extend(query.get("irrelevant", []))
+        for judgment in judgments:
+            derived = derive_evidence_records(corpus_root, judgment)
+            matching = [
+                record
+                for record in derived
+                if record["evidence_id"] == judgment.get("evidence_id")
+                and record["heading"] == judgment.get("heading", record["heading"])
+            ]
+            if len(matching) != 1:
+                raise ValueError(
+                    f"Query {query['id']} has an invalid ADR-0013 evidence identity"
+                )
+
+
 def verify_evidence_hits(
     queries: list[dict],
     runs: dict[str, dict],
     corpus_root: str | Path,
 ) -> None:
-    """Attach evidence IDs only for unique exact passages in frozen source bytes."""
+    """Attach only ADR-0013 evidence IDs proven by exact source coordinates."""
     root = Path(corpus_root).resolve()
-    document_cache = {}
     for query in queries:
         passages = _passages(query.get("required_groups", []))
+        judgments = []
+        for passage in passages:
+            records = derive_evidence_records(root, passage)
+            selected = [
+                record
+                for record in records
+                if record["evidence_id"] == passage["evidence_id"]
+                and record["heading"] == passage.get("heading", record["heading"])
+            ]
+            if len(selected) == 1:
+                judgments.append((passage, records, selected[0]))
         run = runs.get(query["id"], {})
         seen_hits = set()
         for hit_list in (run.get("raw_hits", []), run.get("hits", [])):
@@ -87,27 +268,30 @@ def verify_evidence_hits(
                 if id(hit) in seen_hits:
                     continue
                 seen_hits.add(id(hit))
-                verified_ids = set(hit.get("evidence_ids", []))
+                claimed_ids = set(hit.get("evidence_ids", []))
                 if hit.get("evidence_id"):
-                    verified_ids.add(hit["evidence_id"])
-                for passage in passages:
-                    relative = Path(passage["path"])
-                    document_path = (root / relative).resolve()
-                    try:
-                        document_path.relative_to(root)
-                    except ValueError as error:
-                        raise ValueError("Evidence judgment path is outside the corpus") from error
-                    if document_path not in document_cache:
-                        document_cache[document_path] = document_path.read_text(
-                            encoding="utf-8"
-                        )
-                    passage_text = passage["text"]
+                    claimed_ids.add(hit["evidence_id"])
+                verified_ids = set()
+                for passage, occurrences, selected in judgments:
                     if (
-                        hit.get("path") == passage["path"]
-                        and passage_text in str(hit.get("text") or "")
-                        and document_cache[document_path].count(passage_text) == 1
+                        hit.get("path") != selected["path"]
+                        or str(passage["text"]) not in str(hit.get("text") or "")
                     ):
-                        verified_ids.add(passage["evidence_id"])
+                        continue
+                    if selected["evidence_id"] in claimed_ids:
+                        verified_ids.add(selected["evidence_id"])
+                        continue
+                    if len(occurrences) == 1:
+                        verified_ids.add(selected["evidence_id"])
+                        continue
+                    locator = hit.get("backend_locator") or {}
+                    line = locator.get("line")
+                    if (
+                        locator.get("kind") == "heuristic_line"
+                        and isinstance(line, int)
+                        and selected["line_start"] <= line <= selected["line_end"]
+                    ):
+                        verified_ids.add(selected["evidence_id"])
                 hit["evidence_ids"] = sorted(verified_ids)
 
 
@@ -178,6 +362,7 @@ def _has_explanation(hit: dict) -> bool:
     kind = explanation.get("kind")
     value = explanation.get("value")
     if kind == "match_spans":
+        text_byte_length = len(str(hit.get("text") or "").encode("utf-8"))
         return (
             isinstance(value, list)
             and bool(value)
@@ -185,16 +370,25 @@ def _has_explanation(hit: dict) -> bool:
                 isinstance(span, dict)
                 and isinstance(span.get("start"), int)
                 and isinstance(span.get("end"), int)
-                and 0 <= span["start"] < span["end"]
+                and 0 <= span["start"] < span["end"] <= text_byte_length
                 for span in value
             )
         )
     if kind == "qmd_explain":
         supported = {"blendedScore", "ftsScores", "vectorScores", "rrf", "lex", "vec"}
         return isinstance(value, dict) and any(
-            key in value and value[key] is not None for key in supported
+            key in value and _is_meaningful_explanation_value(value[key])
+            for key in supported
         )
     return False
+
+
+def _is_meaningful_explanation_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (list, dict, str)):
+        return bool(value)
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def evaluate(queries: list[dict], runs: dict[str, dict]) -> dict:

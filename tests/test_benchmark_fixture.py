@@ -198,6 +198,14 @@ def test_public_queries_cite_computed_evidence_ids():
                     FIXTURE / "corpus",
                     judgment,
                 )
+        if query["required_groups"]:
+            assert query["irrelevant"]
+            for judgment in query["irrelevant"]:
+                assert judgment["grade"] == "irrelevant"
+                assert judgment["evidence_id"] == _judgment_evidence_id(
+                    FIXTURE / "corpus",
+                    judgment,
+                )
 
 
 def test_public_benchmark_manifest_matches_frozen_inputs(retrieval_benchmark_mod):
@@ -211,6 +219,9 @@ def test_public_benchmark_manifest_matches_frozen_inputs(retrieval_benchmark_mod
     )
     assert manifest["query_set_hash"] == retrieval_benchmark_mod.query_set_hash(queries)
     assert manifest["judgment_set_hash"] == retrieval_benchmark_mod.judgment_set_hash(queries)
+    assert payload["benchmark_version"] == retrieval_benchmark_mod.benchmark_version(
+        "public", queries
+    )
     assert manifest["split_membership"] == {
         "public": [query["id"] for query in queries]
     }
