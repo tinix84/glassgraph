@@ -329,6 +329,133 @@ def test_cli_requires_complete_backend_configuration(
     assert message in capsys.readouterr().err
 
 
+def test_cli_rejects_empty_qmd_configuration_values(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(tmp_path / "unused.json"),
+                "--backend",
+                "qmd",
+                "--node-executable",
+                "",
+                "--qmd-script",
+                "",
+                "--index",
+                "",
+                "--collection",
+                "",
+                "--corpus-root",
+                str(tmp_path),
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 0,
+        )
+
+    assert error.value.code == 2
+    assert "QMD requires" in capsys.readouterr().err
+
+
+def test_cli_redacts_tokenizer_load_failure(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    tokenizer_path = tmp_path / "secret-tokenizer.json"
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(tmp_path / "unused.json"),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                "--tokenizer",
+                str(tokenizer_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(tokenizer_path) not in stderr
+    assert "Tokenizer could not be loaded" in stderr
+
+
+@pytest.mark.parametrize("failure_kind", ["os-error", "malformed-json"])
+def test_cli_redacts_expected_backend_failures(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    failure_kind,
+):
+    queries = _public_queries()
+    corpus_root = _write_corpus(tmp_path)
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text(
+        json.dumps(
+            _add_manifest(
+                {"schema_version": 1, "queries": queries},
+                queries,
+                retrieval_benchmark_mod,
+                {"public": [record["id"] for record in queries]},
+                corpus_root,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    def run_process(_args, _environment):
+        if failure_kind == "os-error":
+            raise OSError(str(tmp_path / "secret-executable.exe"))
+        return {
+            "stdout": "not-json",
+            "elapsed_ms": 1.0,
+            "peak_working_set_bytes": 1000,
+        }
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(queries_path),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(corpus_root),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=run_process,
+            token_counter=lambda _text: 0,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(tmp_path) not in stderr
+    assert "Retrieval backend execution failed" in stderr
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):

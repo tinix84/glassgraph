@@ -285,7 +285,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     ):
         parser.error("GrooveSeek requires --groove-executable and --knowledge-base")
     if args.backend == "qmd" and any(
-        value is None
+        not value
         for value in (
             args.node_executable,
             args.qmd_script,
@@ -310,7 +310,10 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     if process_runner is None:
         process_runner = retrieval_backends.run_process
     if token_counter is None:
-        token_counter = load_token_counter(args.tokenizer)
+        try:
+            token_counter = load_token_counter(args.tokenizer)
+        except Exception:
+            parser.error("Tokenizer could not be loaded")
     try:
         payload = json.loads(args.queries.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -392,7 +395,15 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             query["id"]: adapter.query(query["query"], limit=args.limit)
             for query in queries
         }
-    except RuntimeError:
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+        RuntimeError,
+    ):
         parser.error("Retrieval backend execution failed")
     try:
         retrieval_benchmark.verify_evidence_hits(
