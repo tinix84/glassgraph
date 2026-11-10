@@ -280,6 +280,24 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         parser.error("Benchmark measurements must be nonnegative and index size must be positive")
     if args.limit < 10:
         parser.error("The result limit must be at least 10 for Recall@10 and nDCG@10")
+    if args.backend == "grooveseek" and (
+        not args.groove_executable or not args.knowledge_base
+    ):
+        parser.error("GrooveSeek requires --groove-executable and --knowledge-base")
+    if args.backend == "qmd" and any(
+        value is None
+        for value in (
+            args.node_executable,
+            args.qmd_script,
+            args.index,
+            args.collection,
+            args.corpus_root,
+        )
+    ):
+        parser.error(
+            "QMD requires --node-executable, --qmd-script, --index, "
+            "--collection, and --corpus-root"
+        )
     if args.privacy == "private":
         if args.split is None or args.output is None:
             parser.error("Private benchmarks require --split and --output")
@@ -297,6 +315,8 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         payload = json.loads(args.queries.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         parser.error("Benchmark input could not be read")
+    if not isinstance(payload, dict):
+        parser.error("Benchmark input is invalid")
     try:
         records = (
             payload.get("records", [])

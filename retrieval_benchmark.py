@@ -30,6 +30,8 @@ HTML_COMPLETE_TAG = re.compile(
 
 def _html_block_start(
     line: str,
+    *,
+    allow_type_7: bool,
 ) -> tuple[bool, re.Pattern[str] | str | None]:
     stripped = line.lstrip(" ")
     if len(line) - len(stripped) > 3:
@@ -57,7 +59,9 @@ def _html_block_start(
     if raw_tag:
         terminator = re.compile(rf"</{raw_tag.group(1)}[ \t]*>", re.IGNORECASE)
         return True, None if terminator.search(stripped[raw_tag.end() :]) else terminator
-    if HTML_BLOCK_TAG.match(line) or HTML_COMPLETE_TAG.match(line):
+    if HTML_BLOCK_TAG.match(line) or (
+        allow_type_7 and HTML_COMPLETE_TAG.match(line)
+    ):
         return True, "blank"
     return False, None
 
@@ -187,9 +191,11 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
     )
     fence = None
     html_block = None
+    paragraph_open = False
     for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
         source_line = line.rstrip("\n")
         if offset < frontmatter_end:
+            paragraph_open = False
             offset += len(line)
             continue
         if line_number == 1:
@@ -197,6 +203,7 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         if fence is not None:
             if re.match(rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*$", source_line):
                 fence = None
+            paragraph_open = False
             offset += len(line)
             continue
         if html_block is not None:
@@ -205,11 +212,20 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
                     html_block = None
             elif html_block.search(source_line):
                 html_block = None
+            paragraph_open = False
             offset += len(line)
             continue
-        html_start, next_html_block = _html_block_start(source_line)
+        if not source_line.strip():
+            paragraph_open = False
+            offset += len(line)
+            continue
+        html_start, next_html_block = _html_block_start(
+            source_line,
+            allow_type_7=not paragraph_open,
+        )
         if html_start:
             html_block = next_html_block
+            paragraph_open = False
             offset += len(line)
             continue
         fence_match = FENCE_OPEN.match(source_line)
@@ -218,6 +234,7 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
             info_string = source_line[fence_match.end(1) :]
             if marker[0] != "`" or "`" not in info_string:
                 fence = (marker[0], len(marker))
+                paragraph_open = False
                 offset += len(line)
                 continue
         match = ATX_HEADING.match(source_line)
@@ -251,6 +268,9 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
             }
             headings.append(heading)
             stack.append(heading)
+            paragraph_open = False
+        else:
+            paragraph_open = True
         offset += len(line)
     for index, heading in enumerate(headings):
         heading["end"] = (

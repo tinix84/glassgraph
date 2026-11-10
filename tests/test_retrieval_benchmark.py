@@ -769,6 +769,22 @@ def test_derive_evidence_ignores_headings_inside_html_blocks(
     assert records[0]["heading_path"] == []
 
 
+def test_type_7_html_tag_does_not_interrupt_paragraph_heading_detection(
+    tmp_path, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "Paragraph\n<custom-element>\n# Real\nEvidence.\n",
+        encoding="utf-8",
+    )
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading_path"] == ["Real"]
+
+
 def test_derive_evidence_normalizes_empty_and_closed_atx_headings(
     tmp_path, retrieval_benchmark_mod
 ):

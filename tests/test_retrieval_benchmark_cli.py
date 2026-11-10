@@ -263,6 +263,72 @@ def test_validate_records_rejects_nonobject_record_roots(
         retrieval_benchmark_cli_mod.validate_records(records)
 
 
+def test_cli_rejects_nonobject_json_root(
+    tmp_path, capsys, retrieval_benchmark_cli_mod
+):
+    queries_path = tmp_path / "queries.json"
+    queries_path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(queries_path),
+                "--backend",
+                "grooveseek",
+                "--groove-executable",
+                "groove",
+                "--knowledge-base",
+                "corpus",
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 0,
+        )
+
+    assert error.value.code == 2
+    assert "Benchmark input is invalid" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("backend", "message"),
+    [
+        ("grooveseek", "GrooveSeek requires"),
+        ("qmd", "QMD requires"),
+    ],
+)
+def test_cli_requires_complete_backend_configuration(
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    backend,
+    message,
+):
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            [
+                "--queries",
+                str(tmp_path / "unused.json"),
+                "--backend",
+                backend,
+                "--privacy",
+                "public",
+                "--benchmark-corpus-root",
+                str(tmp_path),
+                *MEASUREMENT_ARGS,
+            ],
+            process_runner=lambda *_args: pytest.fail("backend must not run"),
+            token_counter=lambda _text: 0,
+        )
+
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):
