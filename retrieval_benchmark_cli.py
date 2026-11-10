@@ -345,10 +345,13 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     except (OSError, UnicodeError, ValueError):
         parser.error("Benchmark evidence verification failed")
     if args.privacy == "private" and args.split == "evaluation":
+        locked_settings = payload.get("manifest", {}).get(
+            "locked_backend_settings"
+        )
         expected_lock = (
-            payload.get("manifest", {})
-            .get("locked_backend_settings", {})
-            .get(args.backend)
+            locked_settings.get(args.backend)
+            if isinstance(locked_settings, dict)
+            else None
         )
         if (
             not SHA256_PATTERN.fullmatch(str(args.settings_lock or ""))

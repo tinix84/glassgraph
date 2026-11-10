@@ -739,7 +739,10 @@ def test_private_cli_filters_split_and_writes_report_without_stdout(
     assert "evaluation private positive" not in output_path.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("invalid_case", ["missing", "mismatch", "changed-settings"])
+@pytest.mark.parametrize(
+    "invalid_case",
+    ["missing", "mismatch", "changed-settings", "malformed-lock-map"],
+)
 def test_private_evaluation_requires_manifest_settings_lock(
     tmp_path,
     capsys,
@@ -768,6 +771,9 @@ def test_private_evaluation_requires_manifest_settings_lock(
             if invalid_case == "mismatch"
             else expected_lock,
         ]
+    elif invalid_case == "malformed-lock-map":
+        payload["manifest"]["locked_backend_settings"] = None
+        args_lock = ["--settings-lock", expected_lock]
     workbook_path = tmp_path / "workbook.json"
     output_path = tmp_path / "report.json"
     workbook_path.write_text(json.dumps(payload), encoding="utf-8")

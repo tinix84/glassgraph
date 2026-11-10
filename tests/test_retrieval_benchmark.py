@@ -754,6 +754,7 @@ def test_derive_evidence_does_not_open_invalid_backtick_fence(
         "<!--\n# Fake\n-->\nEvidence.\n",
         "<div>\n# Fake\n</div>\n\nEvidence.\n",
         "<custom-element>\n# Fake\n</custom-element>\n\nEvidence.\n",
+        '<custom title="x>y">\n# Fake\n</custom>\n\nEvidence.\n',
     ],
 )
 def test_derive_evidence_ignores_headings_inside_html_blocks(

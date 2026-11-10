@@ -23,8 +23,15 @@ HTML_BLOCK_TAG = re.compile(
     r"(?:[ \t]+|/?>|$)",
     re.IGNORECASE,
 )
+HTML_ATTRIBUTE = (
+    r"[ \t]+[A-Za-z_:][A-Za-z0-9_.:-]*"
+    r"(?:[ \t]*=[ \t]*(?:\"[^\"]*\"|'[^']*'|[^\s\"'=<>`]+))?"
+)
 HTML_COMPLETE_TAG = re.compile(
-    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?[ \t]*/?>[ \t]*$"
+    rf"^[ ]{{0,3}}(?:"
+    rf"<[A-Za-z][A-Za-z0-9-]*(?:{HTML_ATTRIBUTE})*[ \t]*/?>"
+    rf"|</[A-Za-z][A-Za-z0-9-]*[ \t]*>"
+    rf")[ \t]*$"
 )
 
 
