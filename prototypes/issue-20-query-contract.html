@@ -187,6 +187,10 @@
           response.warnings.push({ code:'operation_not_supported', message:`${operation} is unavailable in the model-free lane. Glassgraph does not silently substitute lexical search.` });
           return response;
         }
+        if (indexState === 'stale' && (operation === 'related' || operation === 'path')) {
+          response.warnings.push({ code:'stale_index', message:'Typed graph results are unavailable until the derived index matches the Markdown snapshot.' });
+          return response;
+        }
         if (operation === 'search' || operation === 'similar') response.results = [candidateResult(backend, indexState)];
         else response.results = [graphResult(operation,indexState)];
         if (indexState === 'stale') response.warnings.push({ code:'stale_index', message:'Results cannot gain new evidence IDs until the derived index matches the Markdown snapshot.' });

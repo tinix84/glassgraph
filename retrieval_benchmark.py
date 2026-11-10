@@ -14,6 +14,52 @@ import frontmatter
 
 ATX_HEADING = re.compile(r"^[ ]{0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$")
 FENCE_OPEN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,}).*$")
+HTML_BLOCK_TAG = re.compile(
+    r"^[ ]{0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|"
+    r"center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|"
+    r"figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|"
+    r"li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|"
+    r"section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)"
+    r"(?:[ \t]+|/?>|$)",
+    re.IGNORECASE,
+)
+HTML_COMPLETE_TAG = re.compile(
+    r"^[ ]{0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?[ \t]*/?>[ \t]*$"
+)
+
+
+def _html_block_start(
+    line: str,
+) -> tuple[bool, re.Pattern[str] | str | None]:
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3:
+        return False, None
+    special = (
+        ("<!--", re.compile(r"-->")),
+        ("<?", re.compile(r"\?>")),
+        ("<![CDATA[", re.compile(r"\]\]>")),
+    )
+    for prefix, terminator in special:
+        if stripped.startswith(prefix):
+            next_state = (
+                None if terminator.search(stripped[len(prefix) :]) else terminator
+            )
+            return True, next_state
+    declaration = re.match(r"<![A-Z]", stripped)
+    if declaration:
+        terminator = re.compile(r">")
+        return True, None if terminator.search(stripped[declaration.end() :]) else terminator
+    raw_tag = re.match(
+        r"<(script|pre|style|textarea)(?:[ \t]+|>|$)",
+        stripped,
+        re.IGNORECASE,
+    )
+    if raw_tag:
+        terminator = re.compile(rf"</{raw_tag.group(1)}[ \t]*>", re.IGNORECASE)
+        return True, None if terminator.search(stripped[raw_tag.end() :]) else terminator
+    if HTML_BLOCK_TAG.match(line) or HTML_COMPLETE_TAG.match(line):
+        return True, "blank"
+    return False, None
 
 
 def _canonical_hash(domain: str, payload) -> str:
@@ -140,6 +186,7 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         else 0
     )
     fence = None
+    html_block = None
     for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
         source_line = line.rstrip("\n")
         if offset < frontmatter_end:
@@ -150,6 +197,19 @@ def _heading_instances(text: str, document_id: str) -> list[dict]:
         if fence is not None:
             if re.match(rf"^[ ]{{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*$", source_line):
                 fence = None
+            offset += len(line)
+            continue
+        if html_block is not None:
+            if html_block == "blank":
+                if not source_line.strip():
+                    html_block = None
+            elif html_block.search(source_line):
+                html_block = None
+            offset += len(line)
+            continue
+        html_start, next_html_block = _html_block_start(source_line)
+        if html_start:
+            html_block = next_html_block
             offset += len(line)
             continue
         fence_match = FENCE_OPEN.match(source_line)
@@ -564,7 +624,6 @@ def _has_faithful_explanation(hit: dict, query_text: str) -> bool:
         meaningful_term = any(
             len(term) >= 2
             or term.isdigit()
-            or (len(term) == 1 and matched_text.strip().isupper())
             for term in match_terms
         )
         cjk_match = (

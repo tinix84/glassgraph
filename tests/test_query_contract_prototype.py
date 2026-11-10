@@ -78,6 +78,11 @@ if (freshExplain.results[0].trace.some(stage => stage.stage === 'compiler_verifi
 const typedPath = QueryContract.execute('groove', 'fresh', 'path');
 const edge = typedPath.results[0].steps.find(step => step.kind === 'edge').edge;
 if (edge.id !== expected.path_assertion_id) throw new Error('typed path used the wrong assertion ID');
+
+for (const operation of ['related', 'path']) {{
+  const staleGraph = QueryContract.execute('groove', 'stale', operation);
+  if (staleGraph.results.length) throw new Error(`stale ${{operation}} exposed canonical graph IDs`);
+}}
 """
 
     completed = subprocess.run(

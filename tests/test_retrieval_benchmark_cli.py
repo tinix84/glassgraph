@@ -255,6 +255,14 @@ def test_validate_records_rejects_malformed_judgment_container(
         retrieval_benchmark_cli_mod.validate_records([record])
 
 
+@pytest.mark.parametrize("records", [[5], {"q1": {}}])
+def test_validate_records_rejects_nonobject_record_roots(
+    retrieval_benchmark_cli_mod, records
+):
+    with pytest.raises(ValueError, match="records are invalid"):
+        retrieval_benchmark_cli_mod.validate_records(records)
+
+
 def test_cli_rejects_stale_benchmark_version(
     tmp_path, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
 ):

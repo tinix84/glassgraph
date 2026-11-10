@@ -134,6 +134,10 @@ def validate_private_workbook(payload: dict) -> None:
 
 
 def validate_records(records: list[dict]) -> None:
+    if not isinstance(records, list) or any(
+        not isinstance(record, dict) for record in records
+    ):
+        raise ValueError("Benchmark records are invalid")
     record_ids = [record.get("id") for record in records]
     if any(not isinstance(record_id, str) or not record_id for record_id in record_ids):
         raise ValueError("Every benchmark record needs a nonempty ID")

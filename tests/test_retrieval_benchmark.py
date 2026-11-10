@@ -141,13 +141,13 @@ def test_evaluate_reports_exact_evidence_span_accuracy(retrieval_benchmark_mod):
 
 def test_evaluate_reports_context_and_explanation_density(retrieval_benchmark_mod):
     queries = [
-        {"id": "n1", "query": "A", "required_groups": []},
+        {"id": "n1", "query": "Alpha", "required_groups": []},
         {"id": "n2", "query": "C", "required_groups": []},
     ]
     runs = {
         "n1": {
             "hits": [
-                {"path": "a.md", "text": "A", "context_tokens": 10, "explanation": {"kind": "match_spans", "value": [{"start": 0, "end": 1}]}},
+                {"path": "a.md", "text": "Alpha", "context_tokens": 10, "explanation": {"kind": "match_spans", "value": [{"start": 0, "end": 5}]}},
                 {"path": "b.md", "text": "B", "context_tokens": 20, "explanation": None},
             ]
         },
@@ -410,6 +410,28 @@ def test_evaluate_rejects_one_character_overlap_as_faithful_explanation(
     report = retrieval_benchmark_mod.evaluate(queries, runs)
 
     assert report["explanation_trace_availability_rate_top_5"] == 1.0
+    assert report["explanation_fidelity_rate_top_5"] == 0.0
+
+
+def test_evaluate_rejects_single_letter_article_as_faithful_explanation(
+    retrieval_benchmark_mod,
+):
+    queries = [{"id": "n1", "query": "A target", "required_groups": []}]
+    runs = {
+        "n1": {
+            "hits": [{
+                "path": "a.md",
+                "text": "UNRELATED",
+                "explanation": {
+                    "kind": "match_spans",
+                    "value": [{"start": 5, "end": 6}],
+                },
+            }]
+        }
+    }
+
+    report = retrieval_benchmark_mod.evaluate(queries, runs)
+
     assert report["explanation_fidelity_rate_top_5"] == 0.0
 
 
@@ -724,6 +746,27 @@ def test_derive_evidence_does_not_open_invalid_backtick_fence(
     )
 
     assert records[0]["heading_path"] == ["Real"]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "<!--\n# Fake\n-->\nEvidence.\n",
+        "<div>\n# Fake\n</div>\n\nEvidence.\n",
+        "<custom-element>\n# Fake\n</custom-element>\n\nEvidence.\n",
+    ],
+)
+def test_derive_evidence_ignores_headings_inside_html_blocks(
+    tmp_path, retrieval_benchmark_mod, document
+):
+    (tmp_path / "answer.md").write_text(document, encoding="utf-8")
+
+    records = retrieval_benchmark_mod.derive_evidence_records(
+        tmp_path,
+        {"path": "answer.md", "text": "Evidence."},
+    )
+
+    assert records[0]["heading_path"] == []
 
 
 def test_derive_evidence_normalizes_empty_and_closed_atx_headings(

@@ -80,7 +80,7 @@ python retrieval_benchmark_cli.py `
   --offline-verified
 ```
 
-The query file contains the frozen manifest and ADR-0013 evidence IDs. Each positive record keeps required `direct` or `supporting` judgments separate from an explicit nonempty `irrelevant` list. The command derives every identity again from the frozen Markdown, verifies the NFC- and LF-normalized corpus snapshot, and rejects stale manifest hashes or split maps. Line-ending-only and canonically equivalent Unicode changes do not change the corpus snapshot hash.
+The query file contains the frozen manifest and ADR-0013 evidence IDs. Each positive record keeps required `direct` or `supporting` judgments separate from an explicit nonempty `irrelevant` list. The command derives every identity again from the frozen Markdown. It verifies the NFC- and LF-normalized corpus snapshot. It rejects stale manifest hashes or split maps. Line-ending-only and canonically equivalent Unicode changes do not change the corpus snapshot hash.
 
 Benchmark versions are content-addressed as `public-v1-<identity-hash>` or `private-v1-<identity-hash>`. The identity covers both the frozen query set and the judgment set. A query, split, or judgment correction therefore requires a new version. Result limits below 10 are rejected because the report publishes Recall@10 and nDCG@10.
 
