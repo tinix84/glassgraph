@@ -209,6 +209,9 @@ def backend_run(request: dict, response: dict) -> dict:
         or response.get("status") not in {"ok", "abstained"}
         or not isinstance(response.get("index"), dict)
         or response["index"].get("state") != "fresh"
+        or not isinstance(response["index"].get("corpus_snapshot_hash"), str)
+        or response["index"].get("indexed_corpus_snapshot_hash")
+        != response["index"].get("corpus_snapshot_hash")
         or not isinstance(response.get("results"), list)
         or not isinstance(response.get("raw_results"), list)
     ):

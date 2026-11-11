@@ -103,6 +103,7 @@ class GrooveSeekAdapter:
         *,
         executable: str,
         knowledge_base: str,
+        indexed_corpus_snapshot_hash: str,
         process_runner,
         token_counter,
         path_prefix: str | None = None,
@@ -115,6 +116,7 @@ class GrooveSeekAdapter:
             raise ValueError("Unknown GrooveSeek low-confidence policy")
         self.executable = executable
         self.knowledge_base = knowledge_base
+        self.indexed_corpus_snapshot_hash = indexed_corpus_snapshot_hash
         self.process_runner = process_runner
         self.token_counter = token_counter
         self.path_prefix = path_prefix
@@ -221,6 +223,7 @@ class QmdAdapter:
         index: str,
         collection: str,
         corpus_root: str | Path,
+        indexed_corpus_snapshot_hash: str,
         process_runner,
         token_counter,
         path_prefix: str | None = None,
@@ -233,6 +236,7 @@ class QmdAdapter:
         self.index = index
         self.collection = collection
         self.corpus_root = Path(corpus_root).resolve()
+        self.indexed_corpus_snapshot_hash = indexed_corpus_snapshot_hash
         self.process_runner = process_runner
         self.token_counter = token_counter
         self.path_prefix = path_prefix

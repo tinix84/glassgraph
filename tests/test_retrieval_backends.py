@@ -36,6 +36,7 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=run_process,
         token_counter=lambda _text: 9,
         config="benchmark-groove.toml",
@@ -45,6 +46,7 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
 
     run = adapter.query("continuous power", limit=5)
 
+    assert adapter.indexed_corpus_snapshot_hash == "sha256:test-corpus"
     assert run["abstained"] is True
     assert run["hits"] == []
     assert run["raw_hits"] == [
@@ -90,6 +92,7 @@ def test_grooveseek_can_preserve_low_confidence_candidates_for_research_review(
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps(
                 {
@@ -117,6 +120,7 @@ def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps({
                 "results": [{"score": 1, "path": ".notes.md", "content": "Hidden note"}],
@@ -143,6 +147,7 @@ def test_grooveseek_adapter_rejects_nonrelative_result_paths(
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps({
                 "results": [{"score": 1, "path": unsafe_path, "content": "Answer"}],
@@ -189,6 +194,7 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
         index="glassgraph-m1-public",
         collection="glassgraph-m1-public",
         corpus_root=tmp_path,
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=run_process,
         token_counter=lambda _text: 17,
         index_db=tmp_path / "index.sqlite",
@@ -198,6 +204,7 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
 
     run = adapter.query("continuous power", limit=5)
 
+    assert adapter.indexed_corpus_snapshot_hash == "sha256:test-corpus"
     assert run["abstained"] is False
     assert run["hits"] == run["raw_hits"]
     assert run["hits"][0] == {
@@ -247,6 +254,7 @@ def test_backend_adapters_reject_error_objects(
         adapter = retrieval_backends_mod.GrooveSeekAdapter(
             executable="groove",
             knowledge_base="corpus",
+            indexed_corpus_snapshot_hash="sha256:test-corpus",
             process_runner=runner,
             token_counter=lambda _text: 1,
             config="groove.toml",
@@ -260,6 +268,7 @@ def test_backend_adapters_reject_error_objects(
             index="index",
             collection="collection",
             corpus_root=tmp_path,
+            indexed_corpus_snapshot_hash="sha256:test-corpus",
             process_runner=runner,
             token_counter=lambda _text: 1,
             index_db=tmp_path / "index.sqlite",
@@ -277,6 +286,7 @@ def test_grooveseek_adapter_rejects_malformed_scoring_fields(
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps({
                 "results": [{
@@ -303,6 +313,7 @@ def test_grooveseek_adapter_rejects_oversized_json_score(
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
         knowledge_base="corpus",
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps({
                 "results": [{
@@ -332,6 +343,7 @@ def test_qmd_adapter_requires_vector_scores_for_hybrid_run(
         index="index",
         collection="collection",
         corpus_root=tmp_path,
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=lambda *_args: {
             "stdout": json.dumps([{
                 "score": 1.0,
@@ -412,6 +424,7 @@ def test_qmd_adapter_redacts_result_paths_outside_corpus(
         index="index",
         collection="collection",
         corpus_root=tmp_path,
+        indexed_corpus_snapshot_hash="sha256:test-corpus",
         process_runner=run_process,
         token_counter=lambda _text: 1,
     )

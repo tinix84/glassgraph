@@ -710,6 +710,13 @@ def test_stored_query_exchange_rejects_error_and_legacy_results(
             locked_settings=settings,
         )
 
+    request["filters"]["paths"] = []
+    response["request_hash"] = search_lab_mod.query_contract.request_hash(request)
+    response["index"].pop("indexed_corpus_snapshot_hash")
+    response["index"]["state"] = "fresh"
+    with pytest.raises(ValueError, match="stored query exchange"):
+        search_lab_mod.query_contract.backend_run(request, response)
+
     payload["trials"]["holdout-1"] = {
         "role": "holdout",
         "query": "Why?",

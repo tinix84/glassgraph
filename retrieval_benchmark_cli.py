@@ -1287,6 +1287,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         adapter = retrieval_backends.GrooveSeekAdapter(
             executable=args.groove_executable,
             knowledge_base=args.knowledge_base,
+            indexed_corpus_snapshot_hash=payload["manifest"]["corpus_snapshot_hash"],
             process_runner=process_runner,
             token_counter=token_counter,
             path_prefix=args.path_prefix,
@@ -1301,6 +1302,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             index=args.index,
             collection=args.collection,
             corpus_root=args.corpus_root,
+            indexed_corpus_snapshot_hash=payload["manifest"]["corpus_snapshot_hash"],
             process_runner=process_runner,
             token_counter=token_counter,
             path_prefix=args.path_prefix,

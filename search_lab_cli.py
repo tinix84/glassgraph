@@ -149,6 +149,8 @@ def main(argv=None) -> int:
             locked_settings = locked_backends[backend]
             if (
                 not isinstance(backend_payload, dict)
+                or locked_settings.get("indexed_corpus_snapshot_hash")
+                != settings_lock["corpus_snapshot_hash"]
                 or locked_settings.get("corpus_snapshot_hash")
                 != settings_lock["corpus_snapshot_hash"]
                 or backend_payload.get("settings") != locked_settings
