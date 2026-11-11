@@ -20,7 +20,7 @@ The v1 readiness gates are a full private build within 30 minutes and p95 query 
 
 | Option | Pros | Cons | Cost / effort |
 |---|---|---|---|
-| GrooveSeek | Full private build completed in 522.8 seconds [M]. Private mean query latency was 550.5–652.7 ms [M]. Peak query memory was 218.6 MB [M]. | Locked holdout cited-document coverage was 0.50 [M]. Low-confidence results need an explicit review policy. | The local index and pinned embedding model are required. |
+| GrooveSeek | Full private build completed in 522.8 seconds [M]. Private development and holdout p95 latency was 869.5 ms and 575.7 ms [M]. Peak query memory was 218.6 MB [M]. | Locked holdout cited-document coverage was 0.50 [M]. Low-confidence results need an explicit review policy. | The local index and pinned embedding model are required. |
 | QMD 2.8.3 | The public fixture had 0.70 Recall@10 and 0.765 evidence-span accuracy [M]. The adapter preserves hybrid score traces. | The private build produced 220 vectors in 30 minutes, with 1,562 pending [M]. Public p50/p95 query latency was 6.52/10.22 seconds [M]. | The observed CPU rate projects to about four hours for a full private build [E]. |
 | No default | Avoids selecting an imperfect backend. | Every search needs manual backend selection. Reproducible settings and user expectations remain unclear. | The owner must compare backends for each research session. |
 
@@ -33,7 +33,7 @@ The locked GrooveSeek holdout coverage is not a quality ceiling. It is the basel
 ## Consequences
 
 - Glassgraph uses GrooveSeek for default local retrieval.
-- The default policy preserves low-confidence candidates for research review and labels them explicitly.
+- Research sessions preserve low-confidence candidates only through an explicit policy and label them. The adapter default remains abstention.
 - QMD remains an optional adapter and a future performance experiment.
 - A QMD challenger must pass the same frozen-corpus, settings-lock, and holdout workflow.
 - GPU acceleration cannot change the default without a new measured decision record.

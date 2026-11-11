@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import retrieval_benchmark
+import retrieval_benchmark_cli
 
 
 class SearchLabError(ValueError):
@@ -90,8 +91,10 @@ def _citation_is_in_hit(citation: dict, hit: dict) -> bool:
     hit_text = str(hit.get("text") or "")
     if hit.get("path") != citation["path"] or citation["text"] not in hit_text:
         return False
-    if isinstance(hit.get("heading"), str) and (
-        hit["heading"] != citation.get("heading")
+    if (
+        isinstance(hit.get("heading"), str)
+        and isinstance(citation.get("heading"), str)
+        and hit["heading"] != citation["heading"]
     ):
         return False
     locator = hit.get("backend_locator")
@@ -147,6 +150,7 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
             raise SearchLabError("A reference citation must resolve exactly once")
         normalized = deepcopy(citation)
         normalized["evidence_id"] = matching[0]["evidence_id"]
+        normalized["heading"] = matching[0]["heading"]
         normalized["heading_path"] = matching[0]["heading_path"]
         normalized["line_start"] = matching[0]["line_start"]
         normalized["line_end"] = matching[0]["line_end"]
@@ -239,6 +243,7 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
             "raw": sum(int(hit.get("context_tokens") or 0) for hit in raw_hits),
         },
         "abstained": backend_run.get("abstained") is True,
+        "low_confidence": backend_run.get("low_confidence") is True,
         "abstention_disagreement": (
             scoring_eligible
             and not no_answer
@@ -303,10 +308,19 @@ def _adapter_settings(adapter, limit: int) -> dict:
         "node_executable",
         "qmd_script",
         "executable",
+        "model_cache",
     ):
         value = getattr(adapter, name, None)
         if value is not None:
             settings[name] = value
+            path = Path(value)
+            artifact_hash = (
+                retrieval_benchmark_cli._qmd_index_sha256(path)
+                if name == "index_db"
+                else retrieval_benchmark_cli._path_sha256(path)
+            )
+            if artifact_hash is not None:
+                settings[f"{name}_sha256"] = artifact_hash
     corpus_root = getattr(adapter, "corpus_root", None)
     if corpus_root is None:
         knowledge_base = getattr(adapter, "knowledge_base", None)
@@ -315,4 +329,10 @@ def _adapter_settings(adapter, limit: int) -> dict:
         settings["corpus_snapshot_hash"] = retrieval_benchmark.corpus_snapshot_hash(
             corpus_root
         )
+    knowledge_base = getattr(adapter, "knowledge_base", None)
+    if knowledge_base is not None:
+        groove_index = Path(knowledge_base).resolve().parent / ".groove.db"
+        groove_index_hash = retrieval_benchmark_cli._qmd_index_sha256(groove_index)
+        if groove_index_hash is not None:
+            settings["groove_index_sha256"] = groove_index_hash
     return settings

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 
 import pytest
@@ -184,6 +185,7 @@ def test_comparison_exposes_useful_raw_evidence_hidden_by_abstention(
     assert comparison["citation_coverage"] == {"accepted": 0.0, "raw": 1.0}
     assert comparison["missing_citations"] == {"accepted": [0], "raw": []}
     assert comparison["abstention_disagreement"] is True
+    assert comparison["low_confidence"] is False
     assert comparison["raw_hits"][0]["backend_score"]["raw"] == 0.0327
     assert comparison["reference_citations"][0]["evidence_id"].startswith("sha256:")
 
@@ -383,6 +385,47 @@ def test_reference_citation_must_match_its_declared_heading(tmp_path, search_lab
             {"hits": [], "raw_hits": [], "abstained": True},
             tmp_path,
         )
+
+
+def test_reference_without_heading_uses_resolved_heading_for_hit_matching(
+    tmp_path, search_lab_mod
+):
+    (tmp_path / "evidence.md").write_text(
+        "# Actual\n\nExact passage.\n",
+        encoding="utf-8",
+    )
+    trial = {
+        "id": "development-resolved-heading",
+        "role": "development",
+        "query": "Find it.",
+        "reference_citations": [
+            {"path": "evidence.md", "text": "Exact passage.", "grade": "direct"}
+        ],
+    }
+    hit = {"path": "evidence.md", "heading": "Actual", "text": "Exact passage."}
+
+    comparison = search_lab_mod.compare_trial(
+        trial, {"hits": [hit], "raw_hits": [hit], "abstained": False}, tmp_path
+    )
+
+    assert comparison["citation_coverage"]["accepted"] == 1.0
+
+
+def test_adapter_settings_hash_qmd_index_content(tmp_path, search_lab_mod):
+    index = tmp_path / "index.sqlite"
+    with sqlite3.connect(index) as connection:
+        connection.execute("CREATE TABLE records (value TEXT)")
+        connection.execute("INSERT INTO records VALUES ('first')")
+
+    class Adapter:
+        index_db = str(index)
+
+    first = search_lab_mod._adapter_settings(Adapter(), 5)
+    with sqlite3.connect(index) as connection:
+        connection.execute("INSERT INTO records VALUES ('second')")
+    second = search_lab_mod._adapter_settings(Adapter(), 5)
+
+    assert first["index_db_sha256"] != second["index_db_sha256"]
 
 
 def test_same_trials_run_through_each_retrieval_adapter(search_lab_mod):
