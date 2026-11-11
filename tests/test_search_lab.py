@@ -540,8 +540,9 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     output_path = workspace / "report.json"
     brief_path.write_text(json.dumps(brief), encoding="utf-8")
     holdout_brief_path.write_text(json.dumps(holdout_brief), encoding="utf-8")
+    corpus_hash = search_lab_cli_mod.retrieval_benchmark.corpus_snapshot_hash(corpus)
     backend_runs = {
-        "settings": {"limit": 5},
+        "settings": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
         "trials": {
             "development-1": {
                 "query": "What evidence exists?",
@@ -577,10 +578,11 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     lock_path.write_text(
         json.dumps(
             {
-                "backends": {"grooveseek": {"limit": 5}, "qmd": {"limit": 5}},
-                "corpus_snapshot_hash": (
-                    search_lab_cli_mod.retrieval_benchmark.corpus_snapshot_hash(corpus)
-                ),
+                "backends": {
+                    "grooveseek": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
+                    "qmd": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
+                },
+                "corpus_snapshot_hash": corpus_hash,
             }
         ),
         encoding="utf-8",

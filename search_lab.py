@@ -90,8 +90,10 @@ def _citation_is_in_hit(citation: dict, hit: dict) -> bool:
     hit_text = str(hit.get("text") or "")
     if hit.get("path") != citation["path"] or citation["text"] not in hit_text:
         return False
-    if isinstance(hit.get("heading"), str):
-        return hit["heading"] == citation.get("heading")
+    if isinstance(hit.get("heading"), str) and (
+        hit["heading"] != citation.get("heading")
+    ):
+        return False
     locator = hit.get("backend_locator")
     if isinstance(locator, dict) and locator.get("kind") == "heuristic_line":
         passage_offset = hit_text.index(citation["text"])
@@ -296,6 +298,11 @@ def _adapter_settings(adapter, limit: int) -> dict:
         "index",
         "collection",
         "embed_model",
+        "index_db",
+        "config_dir",
+        "node_executable",
+        "qmd_script",
+        "executable",
     ):
         value = getattr(adapter, name, None)
         if value is not None:

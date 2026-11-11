@@ -112,9 +112,12 @@ def main(argv=None) -> int:
         if not isinstance(locked_backends, dict) or set(runs) != set(locked_backends):
             raise ValueError("Backend runs do not match the settings lock")
         for backend, backend_payload in runs.items():
+            locked_settings = locked_backends[backend]
             if (
                 not isinstance(backend_payload, dict)
-                or backend_payload.get("settings") != locked_backends[backend]
+                or locked_settings.get("corpus_snapshot_hash")
+                != settings_lock["corpus_snapshot_hash"]
+                or backend_payload.get("settings") != locked_settings
                 or not isinstance(backend_payload.get("trials"), dict)
             ):
                 raise ValueError(f"Backend runs do not match the lock for {backend}")
