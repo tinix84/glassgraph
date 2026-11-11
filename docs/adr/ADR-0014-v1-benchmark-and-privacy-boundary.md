@@ -1,7 +1,7 @@
 # ADR-0014: Freeze a private evidence benchmark with a synthetic public fixture
 
 - Date: 2026-11-09
-- Status: accepted
+- Status: superseded by ADR-0016
 
 ## Context
 

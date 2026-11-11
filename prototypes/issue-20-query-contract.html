@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glassgraph query contract — issue #20 prototype</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; --bg:#10151d; --panel:#1a2230; --line:#3a465c; --text:#eef3ff; --muted:#aeb9cf; --accent:#78a8ff; --good:#45c985; --warn:#ffd27a; --bad:#ef7777; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); }
+    header { padding:20px; border-bottom:1px solid var(--line); }
+    h1 { margin:0 0 8px; font-size:24px; }
+    h2 { margin:0 0 10px; font-size:18px; }
+    main { max-width:1180px; margin:0 auto; padding:20px; }
+    .warning { color:var(--warn); font-weight:700; }
+    .muted { color:var(--muted); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:14px; margin:12px 0; }
+    .controls, .summary, .scenario-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    button { border:1px solid var(--line); border-radius:7px; background:#151c28; color:var(--text); padding:8px 11px; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    button.active { background:var(--accent); color:#07111f; }
+    button:disabled { cursor:not-allowed; opacity:.45; }
+    .pill { border-radius:99px; padding:5px 9px; background:#111824; }
+    .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    .state-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .state-field { padding:10px; border-radius:7px; background:#111824; }
+    .state-field strong { display:block; margin-bottom:4px; }
+    pre { max-height:440px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#0d121a; border:1px solid var(--line); border-radius:7px; padding:12px; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    .scenario { display:none; }
+    .scenario.active { display:block; }
+    .step { margin:8px 0; padding:10px; border-left:3px solid var(--line); }
+    code { color:#a9c8ff; }
+    @media (max-width:760px) { .state-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Glassgraph backend-neutral query contract</h1>
+    <p><strong>Question:</strong> Which stable JSON state model supports <code>search</code>, <code>similar</code>, <code>related</code>, <code>path</code>, and <code>explain</code>?</p>
+    <p>The model must preserve raw backend traces. It emits an evidence ID only after compiler verification.</p>
+    <div class="warning">THROWAWAY PROTOTYPE — public synthetic data only. This is not a backend decision or production API.</div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Free play</h2>
+      <div class="controls" id="backend-buttons"></div>
+      <div class="controls" id="index-buttons"></div>
+      <div class="controls" id="operation-buttons"></div>
+      <div class="controls">
+        <button data-action="run">Run request</button>
+        <button data-action="verify">Verify top candidate</button>
+        <button data-action="explain">Explain top result</button>
+        <button data-action="reset">Reset</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Current state</h2>
+      <div class="state-grid">
+        <div class="state-field"><strong>Operation</strong><span id="state-operation"></span></div>
+        <div class="state-field"><strong>Execution lane</strong><span id="state-backend"></span></div>
+        <div class="state-field"><strong>Index</strong><span id="state-index"></span></div>
+        <div class="state-field"><strong>Response</strong><span id="state-response"></span></div>
+        <div class="state-field"><strong>Evidence</strong><span id="state-evidence"></span></div>
+        <div class="state-field"><strong>Last transition</strong><span id="state-transition"></span></div>
+      </div>
+      <details open>
+        <summary>Stable request envelope</summary>
+        <pre id="request-json"></pre>
+      </details>
+      <details open>
+        <summary>Stable response envelope</summary>
+        <pre id="response-json"></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Guided edge cases</h2>
+      <div class="tabs" id="scenario-tabs"></div>
+      <div id="scenarios"></div>
+    </section>
+  </main>
+
+  <script>
+    // BEGIN PORTABLE MODULE
+    const QueryContract = (() => {
+      const IDS = {
+        evidence: 'sha256:e95d4b50165e2c6cc4b1e425c8719b630a236accb41b1b81ff2a848270bdacc4',
+        vendorEvidence: 'sha256:adf446220c2e9d5e8457c465958106fc45bd6fb537bbfde287f3f263a9938e63',
+        entity: 'sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33',
+        entityB: 'sha256:ac1d4b4eb4b28981be9bb4db7ba51698eabb86fbb3f93245730ceac874ba11a6',
+        assertion: 'sha256:3fa3647613b63072a11f27579a51e6a27c729895b57c8d6b0657596da0e836ae',
+        predicate: 'sha256:1e69314758fdbe7548d7e3dbf091a3e73a72de6e522b2b4d2acac16d5c9e625b',
+        corpus: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        backend: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+      };
+
+      const verifiedEvidence = {
+        corpus_snapshot_hash:IDS.corpus,
+        backend_snapshot_hash:IDS.backend,
+        path:'wiki/example.md',
+        passage:'Unicode heading evidence.\n',
+        locator:{ path:'wiki/example.md', heading_path:['Résultats'], lines:{ start:16, end:16 }, utf8_bytes:{ start:122, end:148 } },
+        passage_hash:'sha256:72dee9a7bbe246208bfc13cb282fefe245a599a2dc77ea751d95a00eb8f3ae86',
+        source_document_hash:'sha256:28785419904a3300d4e0aec3f30c367b57ed1418705e8deb360806c908cb1c08'
+      };
+
+      const capabilities = {
+        groove: { search:true, similar:true, related:true, path:true, explain:true, mode:'local-model', adapter:'grooveseek', version:'1.24.2' },
+        qmd: { search:true, similar:true, related:true, path:true, explain:true, mode:'local-model', adapter:'qmd', version:'2.8.3' },
+        fallback: { search:true, similar:false, related:true, path:true, explain:true, mode:'model-free', adapter:'glassgraph-exact', version:'v1' }
+      };
+
+      function requestFor(operation) {
+        const common = {
+          schema_version: 'glassgraph.query.v1', operation, limit: 5,
+          filters: { page_types:['company','product'], paths:['wiki/**'], tags_any:[], updated_from:null }
+        };
+        if (operation === 'search') return { ...common, input:{ text:'What evidence appears under the Unicode heading?' } };
+        if (operation === 'similar') return { ...common, input:{ evidence_id:IDS.evidence } };
+        if (operation === 'related') return { ...common, input:{ node:{ kind:'entity', id:IDS.entity }, predicates:[], direction:'both' } };
+        if (operation === 'path') return { ...common, input:{ from:{ kind:'entity', id:IDS.entity }, to:{ kind:'entity', id:IDS.entityB }, max_hops:3, edge_classes:['assertion'] } };
+        return { ...common, input:{ result_ref:{ request_hash:'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', result_id:'result:1' } } };
+      }
+
+      function executionFor(backend) {
+        const value = capabilities[backend];
+        return {
+          mode:value.mode,
+          adapter:{ name:value.adapter, version:value.version },
+          capabilities:Object.fromEntries(['search','similar','related','path','explain'].map(key => [key,value[key]])),
+          backend_snapshot_hash:IDS.backend,
+          fallback:backend === 'fallback' ? { active:true, reason:'local_model_disabled' } : { active:false, reason:null }
+        };
+      }
+
+      function indexFor(indexState) {
+        return {
+          state:indexState,
+          corpus_snapshot_hash:IDS.corpus,
+          stale_reasons:indexState === 'stale' ? ['source_hash_mismatch:wiki/example.md'] : [],
+          checked_at:'2026-11-09T00:00:00Z'
+        };
+      }
+
+      function candidateResult(backend, indexState) {
+        const traces = {
+          groove:{ score_kind:'rrf', raw_score:0.032786883, locator_kind:'utf8_match_span' },
+          qmd:{ score_kind:'hybrid', raw_score:0.8381, locator_kind:'heuristic_line' },
+          fallback:{ score_kind:'bm25', raw_score:7.125, locator_kind:'compiler_passage' }
+        };
+        const trace = traces[backend];
+        return {
+          result_id:'result:1', kind:'passage_candidate', rank:1,
+          score:{ normalized:null, backend:{ adapter:capabilities[backend].adapter, kind:trace.score_kind, raw:trace.raw_score } },
+          backend_trace:{
+            locator_kind:trace.locator_kind,
+            path:'wiki/example.md',
+            line:backend === 'qmd' ? 16 : null,
+            match_spans:backend === 'groove' ? [{ start:0, end:26 }] : null,
+            passage:'Unicode heading evidence.\n',
+            raw_preserved:true
+          },
+          evidence:{ status:indexState === 'stale' ? 'stale' : 'unverified', evidence_id:null, locator:null, verification_error:indexState === 'stale' ? 'source_hash_mismatch' : null }
+        };
+      }
+
+      function graphResult(operation, indexState) {
+        if (operation === 'related') {
+          return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, subject_id:IDS.entityB, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entity }, evidence_ids:[IDS.vendorEvidence] }, score:null };
+        }
+        if (operation === 'path') {
+          return { result_id:'result:1', kind:'typed_path', rank:1, steps:[
+            { kind:'node', node:{ kind:'entity', id:IDS.entity } },
+            { kind:'edge', edge:{ kind:'assertion', id:IDS.assertion, subject_id:IDS.entityB, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entity }, evidence_ids:[IDS.vendorEvidence], direction:'reverse' } },
+            { kind:'node', node:{ kind:'entity', id:IDS.entityB } }
+          ], score:null };
+        }
+        return { result_id:'result:1', kind:'explanation', rank:1, trace:[
+          { stage:'backend_candidate', detail:'Raw adapter score and locator preserved.' },
+          { stage:'compiler_verification', detail:indexState === 'fresh' ? 'Not run: explain needs a referenced result before evidence verification.' : 'Not run: verification is unavailable while the index is stale.' },
+          { stage:'contract_result', detail:'No evidence ID emitted without a verified referenced result.' }
+        ], evidence_ids:[], score:null };
+      }
+
+      function execute(backend, indexState, operation) {
+        const supported = capabilities[backend][operation];
+        const response = {
+          schema_version:'glassgraph.query-result.v1', operation,
+          status:supported ? (indexState === 'stale' ? 'stale' : 'ok') : 'unavailable',
+          execution:executionFor(backend), index:indexFor(indexState), results:[], warnings:[]
+        };
+        if (!supported) {
+          response.warnings.push({ code:'operation_not_supported', message:`${operation} is unavailable in the model-free lane. Glassgraph does not silently substitute lexical search.` });
+          return response;
+        }
+        if (indexState === 'stale' && (operation === 'related' || operation === 'path')) {
+          response.warnings.push({ code:'stale_index', message:'Typed graph results are unavailable until the derived index matches the Markdown snapshot.' });
+          return response;
+        }
+        if (operation === 'search' || operation === 'similar') response.results = [candidateResult(backend, indexState)];
+        else response.results = [graphResult(operation,indexState)];
+        if (indexState === 'stale') response.warnings.push({ code:'stale_index', message:'Results cannot gain new evidence IDs until the derived index matches the Markdown snapshot.' });
+        return response;
+      }
+
+      function verify(response) {
+        if (!response?.results?.length) return response;
+        const next = structuredClone(response);
+        const hit = next.results[0];
+        if (hit.kind !== 'passage_candidate') {
+          next.warnings.push({ code:'verification_not_applicable', message:'This result already comes from the typed compiler graph.' });
+          return next;
+        }
+        if (next.index.state !== 'fresh') {
+          hit.evidence = { status:'stale', evidence_id:null, locator:null, verification_error:'source_hash_mismatch' };
+          next.status = 'stale';
+          return next;
+        }
+        if (next.index.corpus_snapshot_hash !== verifiedEvidence.corpus_snapshot_hash) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'corpus_snapshot_mismatch' };
+          next.status = 'rejected';
+          return next;
+        }
+        if (next.execution.backend_snapshot_hash !== verifiedEvidence.backend_snapshot_hash) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'backend_snapshot_mismatch' };
+          next.status = 'rejected';
+          return next;
+        }
+        const trace = hit.backend_trace;
+        if (trace?.passage === 'Efficiency is 98%.\n') {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'ambiguous_candidate' };
+          next.status = 'rejected';
+          return next;
+        }
+        const locatorMatches = trace?.path === verifiedEvidence.path
+          && trace.passage === verifiedEvidence.passage;
+        if (!locatorMatches) {
+          hit.evidence = { status:'rejected', evidence_id:null, locator:null, verification_error:'candidate_mismatch' };
+          next.status = 'rejected';
+          return next;
+        }
+        hit.kind = 'evidence_hit';
+        hit.evidence = {
+          status:'verified', evidence_id:IDS.evidence,
+          locator:verifiedEvidence.locator,
+          passage_hash:verifiedEvidence.passage_hash,
+          source_document_hash:verifiedEvidence.source_document_hash,
+          verification_error:null
+        };
+        return next;
+      }
+
+      function explain(response) {
+        if (!response?.results?.length) return response;
+        const next = structuredClone(response);
+        const hit = next.results[0];
+        next.explanation = {
+          result_id:hit.result_id,
+          stages:[
+            { name:'adapter', status:'complete', data:hit.backend_trace || { source:'typed_compiler_graph' } },
+            { name:'evidence_verification', status:hit.evidence?.status || 'not_applicable', evidence_id:hit.evidence?.evidence_id || null },
+            { name:'index_freshness', status:next.index.state, reasons:next.index.stale_reasons }
+          ]
+        };
+        return next;
+      }
+
+      function initialState() {
+        const operation = 'search';
+        return { backend:'groove', indexState:'fresh', operation, request:requestFor(operation), response:null, transition:'reset' };
+      }
+
+      function reduce(state, action) {
+        if (action.type === 'RESET') return initialState();
+        if (action.type === 'SET_BACKEND') return { ...state, backend:action.value, response:null, transition:`backend → ${action.value}` };
+        if (action.type === 'SET_INDEX') return { ...state, indexState:action.value, response:null, transition:`index → ${action.value}` };
+        if (action.type === 'SET_OPERATION') return { ...state, operation:action.value, request:requestFor(action.value), response:null, transition:`operation → ${action.value}` };
+        if (action.type === 'RUN') return { ...state, response:execute(state.backend,state.indexState,state.operation), transition:'request executed' };
+        if (action.type === 'VERIFY') return { ...state, response:verify(state.response), transition:'top candidate verification attempted' };
+        if (action.type === 'EXPLAIN') return { ...state, response:explain(state.response), transition:'explanation attached' };
+        return state;
+      }
+
+      return { initialState, reduce, requestFor, execute, verify, explain };
+    })();
+    // END PORTABLE MODULE
+
+    let state = QueryContract.initialState();
+    const scenarios = [
+      { id:'verified', title:'Verified evidence', description:'A backend candidate does not carry an evidence ID until the compiler verifies its exact passage and source hash.', steps:[['RUN','Run GrooveSeek search'],['VERIFY','Verify top candidate'],['EXPLAIN','Attach explanation']] },
+      { id:'stale', title:'Stale index', description:'A stale derived index must retain the raw hit but refuse a new evidence ID.', setup:[['SET_INDEX','stale']], steps:[['RUN','Run with stale index'],['VERIFY','Attempt verification']] },
+      { id:'fallback', title:'Model-free refusal', description:'The model-free lane reports unsupported semantic similarity. It does not silently change the operation.', setup:[['SET_BACKEND','fallback'],['SET_OPERATION','similar']], steps:[['RUN','Run unsupported similar request']] },
+      { id:'typed-path', title:'Typed path', description:'Graph paths preserve typed nodes, assertion edges, predicate IDs, direction, and supporting evidence IDs.', setup:[['SET_OPERATION','path']], steps:[['RUN','Run typed path request'],['EXPLAIN','Attach graph provenance']] },
+      { id:'qmd', title:'QMD locator', description:'QMD can return a heuristic line instead of a byte span. Compiler verification produces the canonical locator.', setup:[['SET_BACKEND','qmd']], steps:[['RUN','Run QMD search'],['VERIFY','Verify against Markdown']] }
+    ];
+
+    function dispatch(action) { state = QueryContract.reduce(state, action); render(); }
+    function button(label, action, active=false) { const item=document.createElement('button'); item.textContent=label; item.classList.toggle('active',active); item.addEventListener('click',()=>dispatch(action)); return item; }
+
+    function renderControls() {
+      const backend=document.querySelector('#backend-buttons'); backend.replaceChildren(); backend.append('Execution lane:'); for (const [value,label] of [['groove','GrooveSeek'],['qmd','QMD'],['fallback','Model-free fallback']]) backend.append(button(label,{type:'SET_BACKEND',value},state.backend===value));
+      const index=document.querySelector('#index-buttons'); index.replaceChildren(); index.append('Index state:'); for (const value of ['fresh','stale']) index.append(button(value,{type:'SET_INDEX',value},state.indexState===value));
+      const operation=document.querySelector('#operation-buttons'); operation.replaceChildren(); operation.append('Operation:'); for (const value of ['search','similar','related','path','explain']) operation.append(button(value,{type:'SET_OPERATION',value},state.operation===value));
+    }
+
+    function evidenceSummary() {
+      const result=state.response?.results?.[0];
+      if (!result) return 'No result';
+      if (result.evidence) return `${result.evidence.status} · ${result.evidence.evidence_id || 'no evidence ID'}`;
+      if (result.assertion) return `canonical assertion · ${result.assertion.evidence_ids.length} evidence ID(s)`;
+      if (result.kind === 'typed_path') return 'typed assertion path';
+      return 'not applicable';
+    }
+
+    function renderState() {
+      document.querySelector('#state-operation').textContent=state.operation;
+      document.querySelector('#state-backend').textContent=state.backend;
+      document.querySelector('#state-index').textContent=state.indexState;
+      document.querySelector('#state-response').textContent=state.response ? `${state.response.status} · ${state.response.results.length} result(s)` : 'not run';
+      document.querySelector('#state-evidence').textContent=evidenceSummary();
+      document.querySelector('#state-transition').textContent=state.transition;
+      document.querySelector('#request-json').textContent=JSON.stringify(state.request,null,2);
+      document.querySelector('#response-json').textContent=state.response ? JSON.stringify(state.response,null,2) : '(run a request)';
+    }
+
+    function applySetup(setup=[]) { state=QueryContract.initialState(); for (const [type,value] of setup) state=QueryContract.reduce(state,{type,value}); render(); }
+    function renderScenarios() {
+      const tabs=document.querySelector('#scenario-tabs'); const body=document.querySelector('#scenarios'); tabs.replaceChildren(); body.replaceChildren();
+      scenarios.forEach((scenario,index)=>{
+        const tab=document.createElement('button'); tab.textContent=scenario.title; tab.classList.toggle('active',index===0); tabs.append(tab);
+        const section=document.createElement('section'); section.className=`scenario${index===0?' active':''}`; section.innerHTML=`<p>${scenario.description}</p>`;
+        const start=document.createElement('button'); start.textContent='Start scenario'; start.addEventListener('click',()=>applySetup(scenario.setup)); section.append(start);
+        scenario.steps.forEach(([type,label],stepIndex)=>{ const row=document.createElement('div'); row.className='step'; const action=document.createElement('button'); action.textContent=`${stepIndex+1}. ${label}`; action.addEventListener('click',()=>dispatch({type})); row.append(action); section.append(row); }); body.append(section);
+        tab.addEventListener('click',()=>{ tabs.querySelectorAll('button').forEach(item=>item.classList.toggle('active',item===tab)); body.querySelectorAll('.scenario').forEach(item=>item.classList.toggle('active',item===section)); });
+      });
+    }
+
+    document.querySelector('[data-action="run"]').addEventListener('click',()=>dispatch({type:'RUN'}));
+    document.querySelector('[data-action="verify"]').addEventListener('click',()=>dispatch({type:'VERIFY'}));
+    document.querySelector('[data-action="explain"]').addEventListener('click',()=>dispatch({type:'EXPLAIN'}));
+    document.querySelector('[data-action="reset"]').addEventListener('click',()=>dispatch({type:'RESET'}));
+    function render(){ renderControls(); renderState(); }
+    renderScenarios(); render();
+  </script>
+</body>
+</html>

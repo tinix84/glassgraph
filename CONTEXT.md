@@ -90,7 +90,27 @@ A benchmark query for which the corpus contains no evidence that answers the que
 
 ## Private benchmark
 
-The local benchmark that uses private corpus questions and evidence judgments. Its query-level data cannot enter the public repository.
+The local holdout evaluation derived from completed private search trials. Its query-level data cannot enter the public repository.
+
+## Research brief
+
+A private statement of the topic, argument, questions, and constraints that make one research session useful to the owner.
+
+## Reference search
+
+An evidence-seeking search of the canonical Markdown corpus that is independent of the Glassgraph retrieval run being evaluated.
+
+## Search trial
+
+One research question, its reference citations, and the retrieval results produced from one locked research brief.
+
+## Retrieval disagreement
+
+A material difference between a reference search and a Glassgraph run, such as a missing citation, noisy hit, unsupported answer, or ranking difference.
+
+## Tuning iteration
+
+One recorded change to retrieval settings followed by a repeat of the development search trials.
 
 ## Qualified predicate
 

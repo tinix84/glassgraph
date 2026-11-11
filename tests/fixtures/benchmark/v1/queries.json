@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "benchmark_version": "public-v1-145f8d0ef292",
+  "description": "Glassgraph v1 synthetic evidence retrieval benchmark",
+  "manifest": {
+    "schema_version": 1,
+    "corpus_snapshot_hash": "sha256:a26be399ffd6fcfa02d809c7cbffd20490537a8ddad5962225e14571acdab82f",
+    "query_set_hash": "sha256:25603cdf883cdd0be2aaa4f612f1d8387890c137abb2f431f6136ab42ca8c8bb",
+    "judgment_set_hash": "sha256:b3255f2194e110d7a63b79194a05510e3a17fe953daa8a5f9b649ffba72e1aa5",
+    "split_membership": {
+      "public": [
+        "p01-auriga-continuous-power",
+        "p02-auriga-cn-alias",
+        "p03-auriga-coolant",
+        "p04-borealis-topology",
+        "p05-borealis-v2g-voltage",
+        "p06-cinder-efficiency",
+        "p07-cinder-isop-switch",
+        "p08-deltaleaf-voltages",
+        "p09-deltaleaf-topologies",
+        "p10-ember-speed-winding",
+        "p11-faraday-thermal-reduction",
+        "p12-helix-temperature",
+        "p13-lumen-cn",
+        "p14-efficiency-comparison",
+        "p15-coolant-comparison",
+        "n01-sodium-ion",
+        "n02-cinder-1500v",
+        "n03-wireless-charger",
+        "n04-gallium-oxide",
+        "n05-quantumflux-date"
+      ]
+    },
+    "adjudication_date": "2026-11-09"
+  },
+  "queries": [
+    {
+      "id": "p01-auriga-continuous-power",
+      "type": "exact",
+      "query": "What is the continuous power rating of the Auriga Drive inverter?",
+      "required_groups": [[{"evidence_id": "sha256:fcc3001badffb1e38361fab63b79a1dccc2622b3d30c435073d76dfcb5d5b417", "path": "auriga-drive.md", "heading": "Electrical ratings", "text": "Auriga Drive is a 900 V silicon-carbide traction inverter rated for 320 kW continuous output.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p02-auriga-cn-alias",
+      "type": "alias",
+      "query": "星航驱动使用哪一种功率半导体材料？",
+      "required_groups": [[{"evidence_id": "sha256:fcc3001badffb1e38361fab63b79a1dccc2622b3d30c435073d76dfcb5d5b417", "path": "auriga-drive.md", "heading": "Electrical ratings", "text": "Auriga Drive is a 900 V silicon-carbide traction inverter rated for 320 kW continuous output.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p03-auriga-coolant",
+      "type": "semantic",
+      "query": "What coolant inlet temperature is allowed at continuous power for Auriga?",
+      "required_groups": [[{"evidence_id": "sha256:88415a24f8bebb18fa5d32f764a81cf6977e382bab2755355f37112a45d5fda6", "path": "auriga-drive.md", "heading": "Thermal system", "text": "The liquid-cooling inlet limit is 65 °C at the continuous-power operating point.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p04-borealis-topology",
+      "type": "semantic",
+      "query": "Which PFC and isolated converter topologies are used by the Borealis charger?",
+      "required_groups": [[{"evidence_id": "sha256:29a13ada41c5a70448d71c625e7b1d6ac5f000b6c7713b7720f4511c21131ee5", "path": "borealis-charger.md", "heading": "Power stage", "text": "Borealis is a 60 kW bidirectional charger that uses an interleaved PFC stage and an isolated CLLC converter.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p05-borealis-v2g-voltage",
+      "type": "semantic",
+      "query": "What is the maximum DC output voltage of the vehicle-to-grid charger?",
+      "required_groups": [[{"evidence_id": "sha256:f6a09abcc82b1037ee5bb6ea917166a69768e3b565302b4ab8d1d7a29461766c", "path": "borealis-charger.md", "heading": "Power stage", "text": "The DC output range is 250 V to 1,000 V, and the charger supports vehicle-to-grid operation.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p06-cinder-efficiency",
+      "type": "exact",
+      "query": "What peak efficiency does the 5.5 kW Cinder rack converter reach?",
+      "required_groups": [[{"evidence_id": "sha256:fd6275350d8216d94ef1ae4cf11293c8cdcc9b45e005c8f72c404f454356c809", "path": "cinder-rack-converter.md", "heading": "Performance", "text": "The 5.5 kW converter reaches 98.4% peak efficiency at half load.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p07-cinder-isop-switch",
+      "type": "cross-domain",
+      "query": "Which switch material is used in the 800 V to 48 V ISOP converter?",
+      "required_groups": [
+        [{"evidence_id": "sha256:a65188df8a7db0c17fc304e98006324a3a9c3b082ad627d0b688836f4dca8fec", "path": "cinder-rack-converter.md", "heading": "Architecture", "text": "Cinder converts an 800 V DC bus to 48 V with an input-series, output-parallel architecture.", "grade": "supporting"}],
+        [{"evidence_id": "sha256:931cc5b2638065393dbf86ce8ef86eec503df08323410cb35205f5e1cf6d7b7b", "path": "cinder-rack-converter.md", "heading": "Architecture", "text": "The isolated modules use gallium-nitride switches and operate at 500 kHz.", "grade": "direct"}]
+      ],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p08-deltaleaf-voltages",
+      "type": "exact",
+      "query": "What feeder voltage and DC bus voltage does DeltaLeaf convert?",
+      "required_groups": [[{"evidence_id": "sha256:038fa3506e122fc0a781898c9d0f90acfdfcc5dddb90f77621dcf7e3c6465171", "path": "deltaleaf-sst.md", "heading": "Conversion chain", "text": "DeltaLeaf converts a 13.8 kV AC feeder to an 800 V DC bus at 1.2 MW.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p09-deltaleaf-topologies",
+      "type": "semantic",
+      "query": "Which SST combines cascaded H-bridge cells with dual-active-bridge modules?",
+      "required_groups": [[{"evidence_id": "sha256:777af1f5d1b7fe0bc848df77f16b34efefb1356b91c0d215ae265be20803c0f6", "path": "deltaleaf-sst.md", "heading": "Conversion chain", "text": "The input stage uses cascaded H-bridge cells, and the isolation stage uses dual-active-bridge modules.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p10-ember-speed-winding",
+      "type": "cross-domain",
+      "query": "What winding does the 24,000 r/min traction motor use?",
+      "required_groups": [
+        [{"evidence_id": "sha256:965459da2cf15b5852f333eff3e5aee4517fbfc0452b32bec3f68d76e93661f1", "path": "ember-motor.md", "heading": "Ember Motor", "text": "Ember uses a hairpin stator winding and an eight-pole permanent-magnet rotor.", "grade": "direct"}],
+        [{"evidence_id": "sha256:8c2ae41cf452069fd6d56a029471fd7ab52824c3972e0bb9514c87f6523b31fe", "path": "ember-motor.md", "heading": "Ember Motor", "text": "The motor delivers 180 kW peak power and operates at up to 24,000 r/min.", "grade": "supporting"}]
+      ],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p11-faraday-thermal-reduction",
+      "type": "semantic",
+      "query": "How much does double-sided cooling reduce junction-to-coolant thermal resistance?",
+      "required_groups": [[{"evidence_id": "sha256:02461f7fc8b28756479d21d0333280b4d414ae075d34c4995843e09e17113c76", "path": "faraday-cooling.md", "heading": "Faraday Cooling Module", "text": "The double-sided cold plate reduces junction-to-coolant thermal resistance by 35% compared with the single-sided reference.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p12-helix-temperature",
+      "type": "exact",
+      "query": "What continuous baseplate temperature is the Helix AMB substrate qualified for?",
+      "required_groups": [[{"evidence_id": "sha256:0321de232118e87617c6d993fbce15fb5c04f1c79c27f9dc13b66f243c0f4bfc", "path": "helix-substrate.md", "heading": "Helix AMB Substrate", "text": "The substrate is qualified for continuous operation at a 175 °C baseplate temperature.", "grade": "direct"}]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p13-lumen-cn",
+      "type": "alias",
+      "query": "氮化镓服务器电源的额定功率和峰值效率是多少？",
+      "required_groups": [[
+        {"evidence_id": "sha256:15f878e4e939e28c55b8f5fba6a8a21491340b7b8d666fe95c23294e93d7e6e5", "path": "lumen-server-psu.md", "heading": "中文别名", "text": "流明服务器电源采用氮化镓开关，额定功率为 3.2 kW，峰值效率为 98.6%。", "grade": "direct"},
+        {"evidence_id": "sha256:c925eacdadd274180d14c08180f1295da74609ec6bed740faeee13aa099c3db7", "path": "lumen-server-psu.md", "heading": "English summary", "text": "The Lumen server PSU uses gallium-nitride switches, has a 3.2 kW rating, and reaches 98.6% peak efficiency.", "grade": "direct"}
+      ]],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p14-efficiency-comparison",
+      "type": "cross-domain",
+      "query": "Compare the peak efficiency of the Cinder rack converter with the full-load efficiency of DeltaLeaf.",
+      "required_groups": [
+        [{"evidence_id": "sha256:fd6275350d8216d94ef1ae4cf11293c8cdcc9b45e005c8f72c404f454356c809", "path": "cinder-rack-converter.md", "heading": "Performance", "text": "The 5.5 kW converter reaches 98.4% peak efficiency at half load.", "grade": "direct"}],
+        [{"evidence_id": "sha256:088c12c0f41a035597a4f0572cb5df918c55805bbaa4d4a96ef32bd8d2bd11f5", "path": "deltaleaf-sst.md", "heading": "Performance", "text": "The measured full-load efficiency is 98.7% with a 45 °C coolant inlet.", "grade": "direct"}]
+      ],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {
+      "id": "p15-coolant-comparison",
+      "type": "cross-domain",
+      "query": "Compare the coolant inlet limits of Auriga Drive and the Borealis charger.",
+      "required_groups": [
+        [{"evidence_id": "sha256:88415a24f8bebb18fa5d32f764a81cf6977e382bab2755355f37112a45d5fda6", "path": "auriga-drive.md", "heading": "Thermal system", "text": "The liquid-cooling inlet limit is 65 °C at the continuous-power operating point.", "grade": "direct"}],
+        [{"evidence_id": "sha256:8bd3dc8d66c195aa3338b548a757f35c41aa197b1eae1d649d302184fb0cdfd3", "path": "borealis-charger.md", "heading": "Cooling", "text": "The liquid loop accepts a 40 °C inlet at 60 kW output.", "grade": "direct"}]
+      ],
+      "irrelevant": [{"evidence_id": "sha256:a2231438855f829c137d808ce01647933f1900393a90b4bb161c772864bafdb3", "path": "cinder-legacy.md", "heading": "Cinder Legacy", "text": "The legacy 5 kW converter accepts 400 V DC, produces 48 V, and reaches 97.1% peak efficiency.", "grade": "irrelevant"}]
+    },
+    {"id": "n01-sodium-ion", "type": "negative", "query": "Which product uses a sodium-ion battery?", "required_groups": []},
+    {"id": "n02-cinder-1500v", "type": "negative", "query": "What is the 1,500 V output rating of the Cinder rack converter?", "required_groups": []},
+    {"id": "n03-wireless-charger", "type": "negative", "query": "Which document describes a 4 MW wireless charger?", "required_groups": []},
+    {"id": "n04-gallium-oxide", "type": "negative", "query": "Which company supplies gallium-oxide switches?", "required_groups": []},
+    {"id": "n05-quantumflux-date", "type": "negative", "query": "What is the release date of the QuantumFlux controller?", "required_groups": []}
+  ]
+}

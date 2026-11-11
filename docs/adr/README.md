@@ -19,3 +19,5 @@ Decisions for glassgraph and the 2brain vault it serves. Specs live as GitHub is
 | [ADR-0013-v1-typed-evidence-contract](ADR-0013-v1-typed-evidence-contract.md) | 2026-11-09 | Define stable evidence, assertion, provenance, determinism, and deletion semantics for v1 |
 | [ADR-0014-v1-benchmark-and-privacy-boundary](ADR-0014-v1-benchmark-and-privacy-boundary.md) | 2026-11-09 | Freeze a private evidence benchmark with a synthetic public fixture and aggregate-only reporting |
 | [ADR-0015-v1-typed-relation-boundary](ADR-0015-v1-typed-relation-boundary.md) | 2026-11-09 | Limit canonical relations to authored, exact-derived, adjudicated, or evidence-qualified assertions |
+| [ADR-0016-topic-driven-private-search-lab](ADR-0016-topic-driven-private-search-lab.md) | 2026-11-11 | Evaluate and tune retrieval through topic-driven private research sessions with disagreement review |
+| [ADR-0017-grooveseek-v1-default-retrieval-backend](ADR-0017-grooveseek-v1-default-retrieval-backend.md) | 2026-11-11 | Use GrooveSeek as the v1 default retrieval backend |
