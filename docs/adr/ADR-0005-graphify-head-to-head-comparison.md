@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-05-22-graphify-comparison-framework-design.md` (2026-05-22). graphify is an off-the-shelf LLM-based graph builder that had already been considered as the bootstrap discovery layer. The stated stake was explicit: if the deterministic entity linker could not be shown to be competitive on the same `raw/` corpus, the whole effort would be reclassified and graphify adopted instead.
+On 2026-05-22, Graphify was the main off-the-shelf language-model graph-builder alternative. The deterministic linker needed a same-corpus comparison before the project could justify continued development.
 
 ## Decision
 

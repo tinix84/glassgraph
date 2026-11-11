@@ -1,0 +1,22 @@
+{
+  "description": "Glassgraph v1 synthetic positive document retrieval benchmark",
+  "version": 1,
+  "collection": "glassgraph-m1-public",
+  "queries": [
+    {"id": "p01-auriga-continuous-power", "query": "What is the continuous power rating of the Auriga Drive inverter?", "type": "exact", "expected_files": ["auriga-drive.md"], "expected_in_top_k": 5},
+    {"id": "p02-auriga-cn-alias", "query": "星航驱动使用哪一种功率半导体材料？", "type": "alias", "expected_files": ["auriga-drive.md"], "expected_in_top_k": 5},
+    {"id": "p03-auriga-coolant", "query": "What coolant inlet temperature is allowed at continuous power for Auriga?", "type": "semantic", "expected_files": ["auriga-drive.md"], "expected_in_top_k": 5},
+    {"id": "p04-borealis-topology", "query": "Which PFC and isolated converter topologies are used by the Borealis charger?", "type": "semantic", "expected_files": ["borealis-charger.md"], "expected_in_top_k": 5},
+    {"id": "p05-borealis-v2g-voltage", "query": "What is the maximum DC output voltage of the vehicle-to-grid charger?", "type": "semantic", "expected_files": ["borealis-charger.md"], "expected_in_top_k": 5},
+    {"id": "p06-cinder-efficiency", "query": "What peak efficiency does the 5.5 kW Cinder rack converter reach?", "type": "exact", "expected_files": ["cinder-rack-converter.md"], "expected_in_top_k": 5},
+    {"id": "p07-cinder-isop-switch", "query": "Which switch material is used in the 800 V to 48 V ISOP converter?", "type": "cross-domain", "expected_files": ["cinder-rack-converter.md"], "expected_in_top_k": 5},
+    {"id": "p08-deltaleaf-voltages", "query": "What feeder voltage and DC bus voltage does DeltaLeaf convert?", "type": "exact", "expected_files": ["deltaleaf-sst.md"], "expected_in_top_k": 5},
+    {"id": "p09-deltaleaf-topologies", "query": "Which SST combines cascaded H-bridge cells with dual-active-bridge modules?", "type": "semantic", "expected_files": ["deltaleaf-sst.md"], "expected_in_top_k": 5},
+    {"id": "p10-ember-speed-winding", "query": "What winding does the 24,000 r/min traction motor use?", "type": "cross-domain", "expected_files": ["ember-motor.md"], "expected_in_top_k": 5},
+    {"id": "p11-faraday-thermal-reduction", "query": "How much does double-sided cooling reduce junction-to-coolant thermal resistance?", "type": "semantic", "expected_files": ["faraday-cooling.md"], "expected_in_top_k": 5},
+    {"id": "p12-helix-temperature", "query": "What continuous baseplate temperature is the Helix AMB substrate qualified for?", "type": "exact", "expected_files": ["helix-substrate.md"], "expected_in_top_k": 5},
+    {"id": "p13-lumen-cn", "query": "氮化镓服务器电源的额定功率和峰值效率是多少？", "type": "alias", "expected_files": ["lumen-server-psu.md"], "expected_in_top_k": 5},
+    {"id": "p14-efficiency-comparison", "query": "Compare the peak efficiency of the Cinder rack converter with the full-load efficiency of DeltaLeaf.", "type": "cross-domain", "expected_files": ["cinder-rack-converter.md", "deltaleaf-sst.md"], "expected_in_top_k": 5},
+    {"id": "p15-coolant-comparison", "query": "Compare the coolant inlet limits of Auriga Drive and the Borealis charger.", "type": "cross-domain", "expected_files": ["auriga-drive.md", "borealis-charger.md"], "expected_in_top_k": 5}
+  ]
+}

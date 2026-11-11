@@ -5,7 +5,7 @@
 
 ## Context
 
-Source: `docs/superpowers/specs/2026-05-03-llm-wiki-design.md` (2026-05-03). A personal research corpus of ~437 mixed CN/EN clippings on power electronics and EV powertrains needed to compound into reusable knowledge rather than be re-derived by query-time RAG on every question. The corpus is browsed in Obsidian and maintained by Claude Code, so the store had to stay plain Markdown and keep a full audit trail back to each original clipping.
+On 2026-05-03, the corpus contained about 437 mixed CN/EN clippings on power electronics and EV powertrains. The wiki needed to compound reusable knowledge instead of repeating query-time retrieval-augmented generation. Obsidian and Claude Code also required plain Markdown and a full audit trail to each clipping.
 
 ## Decision
 

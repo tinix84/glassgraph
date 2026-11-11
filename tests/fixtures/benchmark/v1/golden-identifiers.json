@@ -1,0 +1,15 @@
+{
+  "document_id": "sha256:cc13d6bd4ca7fbd5f442e43d56db96ea81a020c4c99000ba6079e0692527514a",
+  "root_heading_id": "sha256:d36672cf3e74830675315cc12fb5d766a21bcf62ce684d6389ef575b9082d5ac",
+  "first_results_heading_id": "sha256:3d768983e310325af1ccd94415b2b086c54d668520c1d8c0d834c712d70435c3",
+  "second_results_heading_id": "sha256:01176993cc71b8ae7cabc4065ace70fa1db8478973460144a4894e3dc16fd95b",
+  "unicode_heading_id": "sha256:11eb73914fe301626e12029a304457803a1a4b284c09b052fbcdf23a15665b56",
+  "passage_hash": "sha256:a3bc8d367d1b3e130e32585a94d6866abc5c2703c5c9a68a8f6873f6116943bf",
+  "first_evidence_id": "sha256:4b7cfa3b09c93f27bbb18d7fdf420a7d052f1c61be08fc51f798ce72d348d34c",
+  "second_evidence_id": "sha256:5192b389efc2c82bcad2e8424cbb2332a165eb8f9fbd0916409bae10ce56f407",
+  "vendor_passage_hash": "sha256:d65882cdd00d8b32fb6fb11986abb3ce87fd2ec55120732ebff113ebc9e7e2bd",
+  "vendor_evidence_id": "sha256:adf446220c2e9d5e8457c465958106fc45bd6fb537bbfde287f3f263a9938e63",
+  "entity_id": "sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33",
+  "predicate_id": "sha256:c4fe157c9cd173e63c5e0f92ca20e8094a133e170cd385fd86263a3bac6bd9b6",
+  "scalar_assertion_id": "sha256:4661ffcdae95024490714d5f3b9d18435d0689166bf767e59ea5061b89c6e626"
+}
