@@ -300,6 +300,9 @@ def run_trials(session: dict, brief: dict, adapters: dict, *, limit: int) -> dic
 
 def _adapter_settings(adapter, limit: int) -> dict:
     settings = {"limit": limit}
+    indexed_corpus_hash = getattr(adapter, "indexed_corpus_snapshot_hash", None)
+    if indexed_corpus_hash is not None:
+        settings["indexed_corpus_snapshot_hash"] = indexed_corpus_hash
     for name in (
         "config",
         "model",

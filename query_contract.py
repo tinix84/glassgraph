@@ -34,6 +34,30 @@ def search_request(text: str, *, limit: int) -> dict:
     }
 
 
+def validate_search_request(request: dict) -> None:
+    """Reject a request that the production search adapter cannot enforce."""
+    if (
+        not isinstance(request, dict)
+        or request.get("schema_version") != REQUEST_SCHEMA_VERSION
+        or request.get("operation") != "search"
+        or not isinstance(request.get("input"), dict)
+    ):
+        raise QueryContractError("The query request does not match the search contract")
+    text = request["input"].get("text")
+    limit = request.get("limit")
+    if not isinstance(text, str) or not text.strip():
+        raise QueryContractError("A search request needs text")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise QueryContractError("A search request needs a positive limit")
+    if request.get("filters") != {
+        "page_types": [],
+        "paths": [],
+        "tags_any": [],
+        "updated_from": None,
+    }:
+        raise QueryContractError("Search filters are not supported by this adapter")
+
+
 def _canonical_hash(domain: str, value: object) -> str:
     payload = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -106,26 +130,9 @@ def execute_search(
     backend: str, adapter, request: dict, *, settings: dict
 ) -> dict:
     """Execute a search request and preserve the normalized adapter trace."""
-    if (
-        not isinstance(request, dict)
-        or request.get("schema_version") != REQUEST_SCHEMA_VERSION
-        or request.get("operation") != "search"
-        or not isinstance(request.get("input"), dict)
-    ):
-        raise QueryContractError("The query request does not match the search contract")
+    validate_search_request(request)
     text = request["input"].get("text")
     limit = request.get("limit")
-    if not isinstance(text, str) or not text.strip():
-        raise QueryContractError("A search request needs text")
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-        raise QueryContractError("A search request needs a positive limit")
-    if request.get("filters") != {
-        "page_types": [],
-        "paths": [],
-        "tags_any": [],
-        "updated_from": None,
-    }:
-        raise QueryContractError("Search filters are not supported by this adapter")
 
     run = adapter.query(text, limit=limit)
     if (
@@ -136,6 +143,15 @@ def execute_search(
     ):
         raise QueryContractError("The retrieval adapter returned an invalid response")
 
+    corpus_hash = settings.get("corpus_snapshot_hash")
+    indexed_corpus_hash = settings.get("indexed_corpus_snapshot_hash")
+    index_state = (
+        "fresh"
+        if isinstance(corpus_hash, str) and indexed_corpus_hash == corpus_hash
+        else "stale"
+        if isinstance(corpus_hash, str) and isinstance(indexed_corpus_hash, str)
+        else "unbound"
+    )
     response = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "operation": "search",
@@ -151,13 +167,12 @@ def execute_search(
             "fallback": {"active": False, "reason": None},
         },
         "index": {
-            "state": (
-                "fresh"
-                if isinstance(settings.get("corpus_snapshot_hash"), str)
-                else "unbound"
+            "state": index_state,
+            "corpus_snapshot_hash": corpus_hash,
+            "indexed_corpus_snapshot_hash": indexed_corpus_hash,
+            "stale_reasons": (
+                ["indexed_corpus_hash_mismatch"] if index_state == "stale" else []
             ),
-            "corpus_snapshot_hash": settings.get("corpus_snapshot_hash"),
-            "stale_reasons": [],
         },
         "results": [_candidate(hit, rank) for rank, hit in enumerate(run["hits"], 1)],
         "raw_results": [
@@ -182,6 +197,7 @@ def execute_search(
 
 def backend_run(request: dict, response: dict) -> dict:
     """Recover the benchmark run from a versioned search response."""
+    validate_search_request(request)
     if (
         not isinstance(request, dict)
         or request.get("schema_version") != REQUEST_SCHEMA_VERSION

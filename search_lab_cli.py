@@ -95,6 +95,8 @@ def _trial_run(
             or not isinstance(index, dict)
             or index.get("corpus_snapshot_hash")
             != locked_settings.get("corpus_snapshot_hash")
+            or index.get("indexed_corpus_snapshot_hash")
+            != locked_settings.get("indexed_corpus_snapshot_hash")
         ):
             raise ValueError(
                 f"The stored result does not match the locked backend for {trial['id']}"
@@ -137,7 +139,11 @@ def main(argv=None) -> int:
             search_lab.record_iteration(session, iteration)
 
         locked_backends = settings_lock.get("backends")
-        if not isinstance(locked_backends, dict) or set(runs) != set(locked_backends):
+        if (
+            not isinstance(locked_backends, dict)
+            or not locked_backends
+            or set(runs) != set(locked_backends)
+        ):
             raise ValueError("Backend runs do not match the settings lock")
         for backend, backend_payload in runs.items():
             locked_settings = locked_backends[backend]

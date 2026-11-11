@@ -590,6 +590,7 @@ def test_stored_query_exchange_must_match_locked_backend_and_corpus(
     settings = {
         "limit": 5,
         "corpus_snapshot_hash": "sha256:corpus",
+        "indexed_corpus_snapshot_hash": "sha256:corpus",
     }
     request = search_lab_mod.query_contract.search_request("Why?", limit=5)
 
@@ -664,7 +665,11 @@ def test_stored_query_exchange_must_match_locked_backend_and_corpus(
 def test_stored_query_exchange_rejects_error_and_legacy_results(
     search_lab_mod, search_lab_cli_mod
 ):
-    settings = {"limit": 5, "corpus_snapshot_hash": "sha256:corpus"}
+    settings = {
+        "limit": 5,
+        "corpus_snapshot_hash": "sha256:corpus",
+        "indexed_corpus_snapshot_hash": "sha256:corpus",
+    }
     request = search_lab_mod.query_contract.search_request("Why?", limit=5)
 
     class Adapter:
@@ -687,6 +692,17 @@ def test_stored_query_exchange_rejects_error_and_legacy_results(
     }
 
     with pytest.raises(ValueError, match="stored query exchange"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+    response["status"] = "ok"
+    request["filters"]["paths"] = ["allowed/**"]
+    response["request_hash"] = search_lab_mod.query_contract.request_hash(request)
+    with pytest.raises(ValueError, match="filters are not supported"):
         search_lab_cli_mod._trial_run(
             payload,
             trial,
@@ -821,7 +837,11 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     brief_path.write_text(json.dumps(brief), encoding="utf-8")
     holdout_brief_path.write_text(json.dumps(holdout_brief), encoding="utf-8")
     corpus_hash = search_lab_cli_mod.retrieval_benchmark.corpus_snapshot_hash(corpus)
-    settings = {"limit": 5, "corpus_snapshot_hash": corpus_hash}
+    settings = {
+        "limit": 5,
+        "corpus_snapshot_hash": corpus_hash,
+        "indexed_corpus_snapshot_hash": corpus_hash,
+    }
 
     class Adapter:
         def query(self, query, *, limit):
@@ -871,8 +891,8 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
         json.dumps(
             {
                 "backends": {
-                    "grooveseek": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
-                    "qmd": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
+                    "grooveseek": settings,
+                    "qmd": settings,
                 },
                 "corpus_snapshot_hash": corpus_hash,
             }
