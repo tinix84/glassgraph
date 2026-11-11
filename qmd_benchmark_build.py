@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import retrieval_backends
@@ -79,6 +78,9 @@ def main(argv=None, *, process_runner=None) -> int:
 
     try:
         before = retrieval_benchmark_cli._qmd_build_receipt_payload(args)
+        before_embedding_state = (
+            retrieval_benchmark_cli._qmd_active_embedding_state(args)
+        )
     except (OSError, TypeError, ValueError):
         parser.error("QMD build inputs could not be fingerprinted")
 
@@ -90,8 +92,6 @@ def main(argv=None, *, process_runner=None) -> int:
         args.index,
     ]
     environment = _environment(args)
-    started = datetime.now(timezone.utc)
-    started = started.replace(microsecond=(started.microsecond // 1000) * 1000)
     try:
         runner([*common, "update"], environment)
         runner(
@@ -100,8 +100,6 @@ def main(argv=None, *, process_runner=None) -> int:
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         parser.error("The controlled QMD build failed")
-    completed = datetime.now(timezone.utc)
-
     if not retrieval_benchmark_cli._qmd_index_is_ready(args, config_payload):
         parser.error("The controlled QMD build did not produce a ready index")
     try:
@@ -109,24 +107,33 @@ def main(argv=None, *, process_runner=None) -> int:
         stable_keys = set(after) - {"qmd_index_sha256"}
         if any(before.get(key) != after.get(key) for key in stable_keys):
             parser.error("QMD build inputs changed during forced embedding")
-        embedding_times = retrieval_benchmark_cli._qmd_active_embedding_times(args)
+        after_embedding_state = (
+            retrieval_benchmark_cli._qmd_active_embedding_state(args)
+        )
+        refreshed_chunk_count = sum(
+            before_embedding_state.get(identity) != embedded_at
+            for identity, embedded_at in after_embedding_state.items()
+        )
         if (
             before.get("qmd_index_sha256") == after.get("qmd_index_sha256")
-            or not embedding_times
-            or any(
-                embedded_at < started - timedelta(milliseconds=10)
-                or embedded_at > completed + timedelta(milliseconds=10)
-                for embedded_at in embedding_times
-            )
+            or not after_embedding_state
+            or refreshed_chunk_count != len(after_embedding_state)
         ):
             parser.error("QMD forced embedding did not refresh every active chunk")
         build_proof = {
             "schema_version": "glassgraph.qmd-build-proof.v1",
-            "forced_embed_started_at": started.isoformat().replace("+00:00", "Z"),
-            "forced_embed_completed_at": completed.isoformat().replace(
-                "+00:00", "Z"
+            "active_chunk_count": len(after_embedding_state),
+            "refreshed_chunk_count": refreshed_chunk_count,
+            "pre_embedding_state_sha256": (
+                retrieval_benchmark_cli._qmd_embedding_state_sha256(
+                    before_embedding_state
+                )
             ),
-            "active_chunk_count": len(embedding_times),
+            "post_embedding_state_sha256": (
+                retrieval_benchmark_cli._qmd_embedding_state_sha256(
+                    after_embedding_state
+                )
+            ),
             "pre_index_sha256": before.get("qmd_index_sha256"),
             "post_index_sha256": after.get("qmd_index_sha256"),
         }

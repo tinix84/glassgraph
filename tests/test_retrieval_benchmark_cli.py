@@ -64,6 +64,25 @@ PRIVATE_ANSWER_ID = "sha256:ed02295cc9e18510c12565faf6b59374d3fdda301a092ff6d497
 PRIVATE_IRRELEVANT_ID = "sha256:c9870737134c02427c7619a41c77e35fba8605c48340d2201327515c7a639b52"
 
 
+def _write_json_qmd_package(root: Path) -> Path:
+    package = root / "qmd-package"
+    script = package / "bin" / "qmd"
+    yaml_module = package / "node_modules" / "yaml"
+    yaml_module.mkdir(parents=True)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
+    script.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    (yaml_module / "package.json").write_text(
+        '{"name":"yaml","main":"index.js"}',
+        encoding="utf-8",
+    )
+    (yaml_module / "index.js").write_text(
+        "exports.parse = JSON.parse;\n",
+        encoding="utf-8",
+    )
+    return script
+
+
 def _evidence_id(seed):
     return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
 
@@ -168,6 +187,59 @@ def test_qmd_settings_identity_ignores_ambient_embedding_model(
     assert retrieval_benchmark_mod.backend_settings_lock(
         first
     ) == retrieval_benchmark_mod.backend_settings_lock(second)
+
+
+def test_qmd_settings_identity_changes_when_query_model_bytes_change(
+    tmp_path,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    tokenizer = tmp_path / "tokenizer.json"
+    tokenizer.write_text("tokenizer", encoding="utf-8")
+    models = {
+        name: tmp_path / f"{name}.gguf"
+        for name in ("embed", "generate", "rerank")
+    }
+    for name, path in models.items():
+        path.write_text(f"{name} model", encoding="utf-8")
+    config = tmp_path / "fixture.yml"
+    config.write_text(
+        json.dumps(
+            {"models": {name: str(path) for name, path in models.items()}},
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    index = tmp_path / "index.sqlite"
+    with sqlite3.connect(index) as connection:
+        connection.execute("CREATE TABLE evidence (value TEXT)")
+    args = SimpleNamespace(
+        backend="qmd",
+        limit=10,
+        path_prefix=None,
+        tokenizer=tokenizer,
+        node_executable=str(tokenizer),
+        qmd_script=str(_write_json_qmd_package(tmp_path)),
+        index="fixture",
+        collection="fixture",
+        corpus_root=tmp_path,
+        retrieval_model_id=str(models["embed"]),
+        retrieval_model_artifact=models["embed"],
+        backend_config_artifact=[],
+        qmd_config=config,
+        qmd_index_db=index,
+    )
+
+    first = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+    models["generate"].write_text("replacement", encoding="utf-8")
+    second = retrieval_benchmark_cli_mod._backend_settings_payload(args)
+
+    assert first["artifact_hashes"]["qmd_model_generate"] != second[
+        "artifact_hashes"
+    ]["qmd_model_generate"]
+    assert retrieval_benchmark_mod.backend_settings_lock(
+        first
+    ) != retrieval_benchmark_mod.backend_settings_lock(second)
 
 
 def test_sqlite_snapshot_hash_includes_committed_wal_rows(
@@ -320,39 +392,51 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
     assert payload["flags"] == {"enabled": True, "legacy_word": "on"}
 
 
-def test_qmd_config_matches_installed_yaml_and_json_number_semantics(
-    tmp_path, retrieval_benchmark_cli_mod
+def test_qmd_config_hash_uses_installed_qmd_yaml_parser(
+    tmp_path, monkeypatch, retrieval_benchmark_cli_mod
 ):
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("Node.js is not installed")
     config = tmp_path / "fixture.yml"
     config.write_text(
         "values:\n"
+        "  defaults: &defaults {answer: 42}\n"
+        "  merged: {<<: *defaults}\n"
         "  leading_zero_decimal: 0123\n"
         "  exponent: 1e3\n"
         "  infinity: .inf\n"
         "  binary_text: 0b10\n"
+        "  hex_number: 0xFF\n"
+        "  octal_number: 0o77\n"
         "  hex_text: +0xFF\n"
         "  underscore_text: 1_000\n",
         encoding="utf-8",
     )
-    args = SimpleNamespace(qmd_config=config, node_executable=node)
+    qmd_script = tmp_path / "qmd-package" / "bin" / "qmd"
+    qmd_script.parent.mkdir(parents=True)
+    qmd_script.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    args = SimpleNamespace(
+        qmd_config=config,
+        node_executable="node",
+        qmd_script=str(qmd_script),
+    )
 
     payload = retrieval_benchmark_cli_mod._read_qmd_config(args)
 
-    assert payload["values"] == {
-        "leading_zero_decimal": 123,
-        "exponent": 1000.0,
-        "infinity": float("inf"),
-        "binary_text": "0b10",
-        "hex_text": "+0xFF",
-        "underscore_text": "1_000",
-    }
+    expected = (
+        '{"values":{"defaults":{"answer":42},"merged":{"<<":{"answer":42}},'
+        '"leading_zero_decimal":123,"exponent":1000,"infinity":null,'
+        '"binary_text":"0b10","hex_number":255,"octal_number":63,'
+        '"hex_text":"+0xFF","underscore_text":"1_000"}}'
+    )
+
+    def run(command, *, input, **_kwargs):
+        assert command[-1] == str(qmd_script)
+        assert input == config.read_bytes()
+        return SimpleNamespace(returncode=0, stdout=expected.encode("utf-8"))
+
+    monkeypatch.setattr(retrieval_benchmark_cli_mod.subprocess, "run", run)
+
     assert retrieval_benchmark_cli_mod._qmd_config_json(args, payload) == (
-        '{"values":{"leading_zero_decimal":123,"exponent":1000,'
-        '"infinity":null,"binary_text":"0b10","hex_text":"+0xFF",'
-        '"underscore_text":"1_000"}}'
+        expected
     )
 
 
@@ -377,6 +461,12 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             "rerank": "local-rerank.gguf",
         },
     }
+    config = tmp_path / "fixture.yml"
+    config.write_text(
+        json.dumps(config_payload, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    qmd_script = _write_json_qmd_package(tmp_path)
     config_hash = hashlib.sha256(
         json.dumps(
             config_payload,
@@ -429,6 +519,9 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             (document_hash + "_0",),
         )
     args = SimpleNamespace(
+        node_executable=shutil.which("node"),
+        qmd_script=str(qmd_script),
+        qmd_config=config,
         qmd_index_db=database,
         collection="fixture",
         retrieval_model_id=str(model),
@@ -1303,17 +1396,15 @@ def _public_qmd_args(
     command_log=None,
 ):
     artifact_root = tmp_path / "public-qmd-artifacts"
-    package = artifact_root / "qmd-package"
-    script = package / "dist" / "cli" / "qmd.js"
-    script.parent.mkdir(parents=True)
-    (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
-    script.write_text("// fixture", encoding="utf-8")
+    script = _write_json_qmd_package(artifact_root)
     node_executable = shutil.which("node")
     if node_executable is None:
         pytest.skip("Node.js is not installed")
     node = Path(node_executable)
     tokenizer = artifact_root / "tokenizer.json"
-    model = artifact_root / "model.gguf"
+    model = artifact_root / "embed.gguf"
+    generate_model = artifact_root / "generate.gguf"
+    rerank_model = artifact_root / "rerank.gguf"
     config = artifact_root / "fixture.yml"
     index_db = artifact_root / "index.sqlite"
     build_receipt = artifact_root / "qmd-build-receipt.json"
@@ -1321,14 +1412,23 @@ def _public_qmd_args(
         "collections": {"fixture": {"path": str(corpus_root), "pattern": "**/*.md"}},
         "models": {
             "embed": str(model.resolve()),
-            "generate": str(model.resolve()),
-            "rerank": str(model.resolve()),
+            "generate": str(generate_model.resolve()),
+            "rerank": str(rerank_model.resolve()),
         },
     }
     for path, content in (
         (tokenizer, "tokenizer"),
-        (model, "GGUF fixture"),
-        (config, yaml.safe_dump(config_payload, sort_keys=False)),
+        (model, "embed fixture"),
+        (generate_model, "generate fixture"),
+        (rerank_model, "rerank fixture"),
+        (
+            config,
+            json.dumps(
+                config_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        ),
     ):
         path.write_text(content, encoding="utf-8")
     config_hash = hashlib.sha256(
@@ -1395,7 +1495,7 @@ def _public_qmd_args(
             with sqlite3.connect(index_db) as connection:
                 connection.execute(
                     "UPDATE content_vectors SET embedded_at = "
-                    "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+                    "'2001-01-01T00:00:00.000Z'"
                 )
         return {
             "stdout": "",
@@ -1482,6 +1582,16 @@ def test_qmd_build_receipt_detects_model_replacement(
         receipt["build_proof"]["pre_index_sha256"]
         != receipt["build_proof"]["post_index_sha256"]
     )
+    assert retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
+
+    generate_model = Path(
+        yaml.safe_load(args.qmd_config.read_text(encoding="utf-8"))["models"][
+            "generate"
+        ]
+    )
+    generate_model.write_text("replaced query model", encoding="utf-8")
+    assert not retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
+    generate_model.write_text("generate fixture", encoding="utf-8")
     assert retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
 
     no_op_receipt = tmp_path / "no-op-build-receipt.json"

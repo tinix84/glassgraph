@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import unicodedata
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 from tokenizers import Tokenizer
@@ -249,6 +249,13 @@ def _backend_settings_payload(args) -> dict:
     qmd_config = getattr(args, "qmd_config", None)
     qmd_index_db = getattr(args, "qmd_index_db", None)
     qmd_build_receipt = getattr(args, "qmd_build_receipt", None)
+    try:
+        qmd_model_hashes = _qmd_model_artifact_hashes(_read_qmd_config(args))
+    except (AttributeError, OSError, TypeError, ValueError):
+        qmd_model_hashes = {
+            f"qmd_model_{name}": None
+            for name in ("embed", "generate", "rerank")
+        }
     return {
         **common,
         "node_executable": args.node_executable,
@@ -265,6 +272,7 @@ def _backend_settings_payload(args) -> dict:
             "qmd_config": _file_sha256(qmd_config),
             "index": _qmd_index_sha256(qmd_index_db),
             "build_receipt": _file_sha256(qmd_build_receipt),
+            **qmd_model_hashes,
         },
     }
 
@@ -282,32 +290,24 @@ def _read_qmd_config(args) -> dict:
     return payload
 
 
-def _qmd_json_input(value):
-    if isinstance(value, float) and not math.isfinite(value):
-        return None
-    if isinstance(value, dict):
-        return {key: _qmd_json_input(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_qmd_json_input(item) for item in value]
-    return value
-
-
-def _qmd_config_json(args, payload: dict) -> str:
+def _qmd_config_json(args, _payload: dict) -> str:
     node_executable = getattr(args, "node_executable", None) or shutil.which("node")
     if not node_executable:
         raise OSError("Node.js is required for QMD configuration hashing")
-    source = json.dumps(
-        _qmd_json_input(payload),
-        ensure_ascii=False,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
+    qmd_script = getattr(args, "qmd_script", None)
+    if not qmd_script:
+        raise ValueError("The QMD script is required for configuration hashing")
+    source = args.qmd_config.read_bytes()
     completed = subprocess.run(
         [
             str(node_executable),
             "-e",
-            "const fs=require('fs');const value=JSON.parse("
+            "const fs=require('fs');const path=require('path');"
+            "const {createRequire}=require('module');"
+            "const req=createRequire(path.resolve(process.argv[1]));"
+            "const YAML=req('yaml');const value=YAML.parse("
             "fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(value));",
+            str(qmd_script),
         ],
         input=source,
         check=False,
@@ -336,6 +336,21 @@ def _qmd_config_uses_local_models(payload: dict) -> bool:
         and Path(models[name]).expanduser().is_file()
         for name in ("embed", "generate", "rerank")
     )
+
+
+def _qmd_model_artifact_hashes(payload: dict) -> dict[str, str | None]:
+    models = payload.get("models")
+    if not isinstance(models, dict):
+        return {
+            f"qmd_model_{name}": None
+            for name in ("embed", "generate", "rerank")
+        }
+    return {
+        f"qmd_model_{name}": _path_sha256(Path(models[name]).expanduser())
+        if isinstance(models.get(name), str) and models[name]
+        else None
+        for name in ("embed", "generate", "rerank")
+    }
 
 
 def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
@@ -420,6 +435,7 @@ def _backend_source_matches_benchmark(args, backend_root: Path) -> bool:
 
 
 def _qmd_build_receipt_payload(args) -> dict:
+    config_payload = _read_qmd_config(args)
     return {
         "schema_version": "glassgraph.qmd-build-receipt.v1",
         "qmd_package_sha256": _qmd_package_sha256(args.qmd_script),
@@ -429,6 +445,7 @@ def _qmd_build_receipt_payload(args) -> dict:
         "retrieval_model_artifact_sha256": _path_sha256(
             args.retrieval_model_artifact
         ),
+        "qmd_model_artifact_hashes": _qmd_model_artifact_hashes(config_payload),
         "corpus_documents": {
             path: item["raw_hash"]
             for path, item in _corpus_documents(args.corpus_root).items()
@@ -436,14 +453,15 @@ def _qmd_build_receipt_payload(args) -> dict:
     }
 
 
-def _qmd_active_embedding_times(args) -> list[datetime]:
+def _qmd_active_embedding_state(args) -> dict[str, datetime]:
     fingerprint = _qmd_embedding_fingerprint(args.retrieval_model_id)
     uri = args.qmd_index_db.resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
         values = [
-            row[0]
+            row
             for row in connection.execute(
-                "SELECT cv.embedded_at FROM content_vectors AS cv "
+                "SELECT cv.hash, cv.seq, cv.embedded_at "
+                "FROM content_vectors AS cv "
                 "JOIN documents AS d ON d.hash = cv.hash "
                 "WHERE d.collection = ? AND d.active = 1 "
                 "AND cv.model = ? AND cv.embed_fingerprint = ?",
@@ -454,45 +472,60 @@ def _qmd_active_embedding_times(args) -> list[datetime]:
                 ),
             )
         ]
-    if any(not isinstance(value, str) for value in values):
+    if any(
+        not isinstance(document_hash, str)
+        or not isinstance(sequence, int)
+        or not isinstance(value, str)
+        for document_hash, sequence, value in values
+    ):
         raise ValueError("QMD embedding timestamps are invalid")
-    return [
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-        for value in values
-    ]
+    state = {
+        f"{document_hash}_{sequence}": datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        )
+        for document_hash, sequence, value in values
+    }
+    if len(state) != len(values):
+        raise ValueError("QMD embedding identities are not unique")
+    return state
+
+
+def _qmd_active_embedding_times(args) -> list[datetime]:
+    return list(_qmd_active_embedding_state(args).values())
+
+
+def _qmd_embedding_state_sha256(state: dict[str, datetime]) -> str:
+    serialized = json.dumps(
+        {
+            key: value.isoformat()
+            for key, value in sorted(state.items())
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(serialized).hexdigest()
 
 
 def _qmd_build_proof_is_valid(args, proof: object) -> bool:
     if not isinstance(proof, dict):
         return False
     try:
-        started = datetime.fromisoformat(
-            proof["forced_embed_started_at"].replace("Z", "+00:00")
-        )
-        completed = datetime.fromisoformat(
-            proof["forced_embed_completed_at"].replace("Z", "+00:00")
-        )
-        times = _qmd_active_embedding_times(args)
+        state = _qmd_active_embedding_state(args)
     except (KeyError, OSError, sqlite3.Error, TypeError, ValueError):
         return False
     current_index_hash = _qmd_index_sha256(args.qmd_index_db)
     return (
         proof.get("schema_version") == "glassgraph.qmd-build-proof.v1"
         and isinstance(proof.get("active_chunk_count"), int)
-        and proof["active_chunk_count"] == len(times)
-        and bool(times)
+        and proof["active_chunk_count"] == len(state)
+        and proof.get("refreshed_chunk_count") == len(state)
+        and bool(state)
         and proof.get("post_index_sha256") == current_index_hash
         and proof.get("pre_index_sha256") != current_index_hash
-        and started.tzinfo is not None
-        and completed.tzinfo is not None
-        and all(embedded_at.tzinfo is not None for embedded_at in times)
-        and started <= completed
-        and all(
-            started - timedelta(milliseconds=10)
-            <= embedded_at
-            <= completed + timedelta(milliseconds=10)
-            for embedded_at in times
-        )
+        and proof.get("post_embedding_state_sha256")
+        == _qmd_embedding_state_sha256(state)
+        and proof.get("pre_embedding_state_sha256")
+        != proof.get("post_embedding_state_sha256")
     )
 
 
