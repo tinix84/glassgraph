@@ -20,6 +20,57 @@ from pathlib import Path
 
 import yaml
 
+PAGE_TYPES = ("company", "technology", "product", "market", "theme", "source")
+SOURCE_REQUIRED = ("source_url", "source_lang", "source_created", "ingested", "source_kind", "touches")
+
+
+def validate_metadata(meta: dict, expected_type: str | None = None) -> list[str]:
+    """Shared structural rules for lint and the validating page writer."""
+    import datetime
+
+    errors = []
+    page_type = meta.get("type")
+    if page_type not in PAGE_TYPES:
+        errors.append(f"type: must be one of {PAGE_TYPES} (got {page_type!r})")
+    elif expected_type is not None and page_type != expected_type:
+        errors.append(f"type: frontmatter says '{page_type}', expected '{expected_type}'")
+    for field in ("aliases", "aliases_en", "aliases_cn", "tags", "sources"):
+        if field in meta:
+            value = meta[field]
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                errors.append(f"{field}: must be a list of strings")
+    if "vendor" in meta and not isinstance(meta["vendor"], str):
+        errors.append('vendor: must be a string (quote "[[Company]]")')
+    for field in ("summary", "country", "kind", "category", "thesis", "status",
+                  "source_url", "source_lang", "source_kind"):
+        if field in meta and (meta[field] is not None or field in SOURCE_REQUIRED):
+            if not isinstance(meta[field], str):
+                errors.append(f"{field}: must be a string")
+    if "touches" in meta:
+        value = meta["touches"]
+        if not isinstance(value, list) or not all(
+            isinstance(x, str) and re.fullmatch(r"\[\[[^\[\]]+\]\]", x.strip()) for x in value
+        ):
+            errors.append('touches: must be a list of "[[Entity]]" strings (touches: [] if empty; never nested lists)')
+    if page_type == "source":
+        for field in SOURCE_REQUIRED:
+            if field not in meta:
+                errors.append(f"{field}: required for source pages")
+    for field in ("created", "updated", "released", "source_created", "ingested"):
+        if field not in meta:
+            continue
+        value = meta[field]
+        if value == "?" or type(value) is datetime.date:
+            continue
+        if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            try:
+                datetime.date.fromisoformat(value)
+                continue
+            except ValueError:
+                pass
+        errors.append(f'{field}: must be YYYY-MM-DD or "?" (got {value!r})')
+    return errors
+
 # The one shared wikilink regex (target group 1, optional |display ignored)
 WIKILINK_RE = re.compile(r"\[\[([^\[\]\|]+?)(?:\|[^\[\]]+)?\]\]")
 
@@ -71,7 +122,7 @@ def parse(text: str) -> ParsedPage:
             loader = _DupKeyLoader(fm_text)
             try:
                 meta = loader.get_single_data()
-            except yaml.YAMLError as e:
+            except (yaml.YAMLError, ValueError) as e:
                 return ParsedPage(None, body, fm_text, str(e), had_bom=had_bom)
             finally:
                 loader.dispose()

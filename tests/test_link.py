@@ -33,7 +33,9 @@ def _make_source_page(tmp_path: Path, name: str, touches: list[str]) -> Path:
     p = sources / name
     fm_t = "\n".join(f"  - '[[{t}]]'" for t in touches)
     p.write_text(
-        f"---\ntype: source\nsource_url: http://example.com/{name}\ntouches:\n{fm_t}\n---\nBody.\n",
+        f"---\ntype: source\nsource_url: http://example.com/{name}\n"
+        "source_lang: en\nsource_created: 2026-01-01\ningested: 2026-06-11\n"
+        f"source_kind: technical\ntouches:\n{fm_t}\n---\nBody.\n",
         encoding="utf-8",
     )
     return p

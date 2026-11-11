@@ -1,4 +1,4 @@
-"""Defensive lints for the 2brain wiki — 13 checks aggregated into one report.
+"""Defensive lints for the 2brain wiki — 14 checks aggregated into one report.
 
 Each check is a pure function: (root_path) -> list[LintFinding]. Findings are
 sorted by severity (CRITICAL > WARN > INFO) then file path. Returns exit code 1
@@ -28,6 +28,18 @@ frontmatter = _load_frontmatter()
 _WIKILINK_RE = frontmatter.WIKILINK_RE
 _SEVERITY_ORDER = {"CRITICAL": 0, "WARN": 1, "INFO": 2}
 _ENTITY_DIRS = ("companies", "technologies", "products", "markets", "themes")
+
+
+def _strings(value) -> list[str]:
+    """Let diagnostic checks continue after malformed metadata is reported."""
+    if isinstance(value, str):
+        return [value]
+    return [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
+
+
+def _link_note(target: str) -> str:
+    """Remove the heading or block reference, preserving the note path."""
+    return target.split("#", 1)[0].strip()
 
 
 @dataclass
@@ -90,11 +102,8 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
         fm, _ = _read_frontmatter(page)
         if not fm:
             continue
-        for field in ("aliases_en", "aliases_cn"):
-            val = fm.get(field) or []
-            if isinstance(val, str):
-                val = [val]
-            for alias in val:
+        for field in ("aliases", "aliases_en", "aliases_cn"):
+            for alias in _strings(fm.get(field)):
                 if isinstance(alias, str) and alias.strip():
                     canonical_index.setdefault(alias.strip(), canonical)
 
@@ -109,6 +118,23 @@ def _build_canonical_index(wiki_root: Path) -> dict[str, str]:
         p = wiki_root / f"{name}.md"
         if p.exists():
             canonical_index.setdefault(name, name)
+
+    # Index literal filenames and qualified paths; never reduce a missing path
+    # to its basename, which would hide broken references to other folders.
+    for page in _all_wiki_pages(wiki_root) + [wiki_root / "log.md", wiki_root / "overview.md"]:
+        if not page.is_file():
+            continue
+        relative = page.relative_to(wiki_root).as_posix()
+        for key in (page.name, relative, "wiki/" + relative):
+            canonical_index.setdefault(key, page.stem)
+            canonical_index.setdefault(key.removesuffix(".md"), page.stem)
+
+    # Raw clippings are also valid Obsidian citation targets. Read paths only.
+    for folder in ("raw", "raw-CN"):
+        for page in sorted((wiki_root.parent / folder).rglob("*.md")):
+            relative = page.relative_to(wiki_root.parent).as_posix()
+            for key in (page.stem, page.name, relative, relative.removesuffix(".md")):
+                canonical_index.setdefault(key, page.stem)
 
     return canonical_index
 
@@ -141,10 +167,7 @@ def check_duplicate_aliases(wiki_root: Path) -> list[LintFinding]:
             continue
         seen_on_this_page: set[str] = set()
         for field in ("aliases_en", "aliases_cn"):
-            val = fm.get(field) or []
-            if isinstance(val, str):
-                val = [val]
-            for alias in val:
+            for alias in _strings(fm.get(field)):
                 if not isinstance(alias, str) or not alias.strip():
                     continue
                 a = alias.strip()
@@ -174,7 +197,9 @@ def check_broken_wikilinks(wiki_root: Path) -> list[LintFinding]:
         text = page.read_text(encoding="utf-8")
         for line_idx, line in enumerate(text.splitlines(), start=1):
             for m in _WIKILINK_RE.finditer(line):
-                target = m.group(1).strip()
+                target = _link_note(m.group(1))
+                if not target:
+                    continue  # A heading or block within this note.
                 if target not in canonical_index:
                     findings.append(LintFinding(
                         severity="WARN", check="broken-wikilink",
@@ -194,7 +219,9 @@ def check_case_mismatch_wikilinks(wiki_root: Path) -> list[LintFinding]:
         text = page.read_text(encoding="utf-8")
         for line_idx, line in enumerate(text.splitlines(), start=1):
             for m in _WIKILINK_RE.finditer(line):
-                target = m.group(1).strip()
+                target = _link_note(m.group(1))
+                if not target:
+                    continue
                 if target in canonical_index:
                     continue
                 lower = target.lower()
@@ -223,7 +250,7 @@ def check_missing_required_fields(wiki_root: Path) -> list[LintFinding]:
             ))
         has_en = bool(fm.get("aliases_en"))
         has_cn = bool(fm.get("aliases_cn"))
-        if not (has_en or has_cn) and "merged" not in (fm.get("tags") or []):
+        if not (has_en or has_cn) and "merged" not in _strings(fm.get("tags")):
             findings.append(LintFinding(
                 severity="CRITICAL", check="missing-required-field",
                 file=page, line=None,
@@ -256,10 +283,7 @@ def check_touches_orphans(wiki_root: Path) -> list[LintFinding]:
         fm, _ = _read_frontmatter(page)
         if not fm:
             continue
-        touches = fm.get("touches") or []
-        if isinstance(touches, str):
-            touches = [touches]
-        for raw in touches:
+        for raw in _strings(fm.get("touches")):
             if not isinstance(raw, str):
                 continue
             m = _WIKILINK_RE.match(raw.strip())
@@ -281,7 +305,7 @@ def check_empty_aliases_non_merged(wiki_root: Path) -> list[LintFinding]:
         fm, _ = _read_frontmatter(page)
         if not fm:
             continue
-        if "merged" in (fm.get("tags") or []):
+        if "merged" in _strings(fm.get("tags")):
             continue
         has_en = bool(fm.get("aliases_en"))
         has_cn = bool(fm.get("aliases_cn"))
@@ -308,23 +332,24 @@ def check_aliases_drift(wiki_root: Path) -> list[LintFinding]:
         fm, _ = _read_frontmatter(page)
         if not fm:
             continue
-        if "merged" in (fm.get("tags") or []):
+        if "merged" in _strings(fm.get("tags")):
             continue
 
-        def _coerce(val):
-            if not val:
-                return []
-            return [val] if isinstance(val, str) else list(val)
-
-        aliases_union = set(_coerce(fm.get("aliases")))
-        aliases_en = set(_coerce(fm.get("aliases_en")))
-        aliases_cn = set(_coerce(fm.get("aliases_cn")))
+        aliases_union = set(_strings(fm.get("aliases")))
+        aliases_en = set(_strings(fm.get("aliases_en")))
+        aliases_cn = set(_strings(fm.get("aliases_cn")))
         drift = aliases_union - (aliases_en | aliases_cn)
         if drift:
             findings.append(LintFinding(
                 severity="WARN", check="aliases-drift",
                 file=page, line=None,
                 message=f"aliases: has {len(drift)} term(s) not in aliases_en/cn: {sorted(drift)[:5]}",
+            ))
+        missing = (aliases_en | aliases_cn) - aliases_union
+        if missing:
+            findings.append(LintFinding(
+                severity="WARN", check="aliases-drift", file=page, line=None,
+                message=f"aliases: missing {len(missing)} term(s) from aliases_en/cn: {sorted(missing)[:5]}",
             ))
     return findings
 
@@ -427,11 +452,29 @@ def check_relation_drift(pages: list[Path]) -> list[LintFinding]:
 
 # ── Aggregator + exit code ──────────────────────────────────────────────────
 
+
+def check_metadata_validity(wiki_root: Path) -> list[LintFinding]:
+    """Check metadata shapes and dates with the writer's shared validator."""
+    expected = dict(zip(_ENTITY_DIRS, ("company", "technology", "product", "market", "theme")))
+    expected["sources"] = "source"
+    findings = []
+    for folder, page_type in expected.items():
+        for page in sorted((wiki_root / folder).glob("*.md")):
+            parsed = frontmatter.parse_file(page)
+            if parsed.error:
+                continue  # Reported by yaml-validity.
+            errors = (["missing frontmatter"] if parsed.metadata is None else
+                      frontmatter.validate_metadata(parsed.metadata, page_type))
+            for error in errors:
+                findings.append(LintFinding("CRITICAL", "metadata-validity", page, None, error))
+    return findings
+
 def run_lint(wiki_root: Path) -> list[LintFinding]:
-    """Run all 13 checks and return findings sorted by severity then file."""
+    """Run all 14 checks and return findings sorted by severity then file."""
     all_pages = _all_wiki_pages(wiki_root)
     findings: list[LintFinding] = []
     findings.extend(check_yaml_validity(all_pages))
+    findings.extend(check_metadata_validity(wiki_root))
     findings.extend(check_duplicate_aliases(wiki_root))
     findings.extend(check_broken_wikilinks(wiki_root))
     findings.extend(check_case_mismatch_wikilinks(wiki_root))
