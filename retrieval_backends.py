@@ -232,7 +232,7 @@ class QmdAdapter:
             str(Path(config_dir).resolve()) if config_dir is not None else None
         )
         self.embed_model = (
-            str(Path(embed_model).resolve()) if embed_model is not None else None
+            str(embed_model) if embed_model is not None else None
         )
 
     def query(self, text: str, *, limit: int) -> dict:

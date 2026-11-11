@@ -395,6 +395,36 @@ def _exact_normalized_boundaries(
     ]
 
 
+def _normalized_prefix_boundary_candidates(
+    segment: str,
+    normalized_offset: int,
+):
+    def normalized_prefix_length(index: int) -> int:
+        return len(unicodedata.normalize("NFC", segment[:index]))
+
+    low = 0
+    high = len(segment) + 1
+    while low < high:
+        middle = (low + high) // 2
+        if normalized_prefix_length(middle) < normalized_offset:
+            low = middle + 1
+        else:
+            high = middle
+    first = low
+    if first > len(segment) or normalized_prefix_length(first) != normalized_offset:
+        return ()
+
+    low = first
+    high = len(segment) + 1
+    while low < high:
+        middle = (low + high) // 2
+        if normalized_prefix_length(middle) <= normalized_offset:
+            low = middle + 1
+        else:
+            high = middle
+    return range(first, low)
+
+
 def _original_utf8_byte_offset(
     original_text: str,
     normalized_offset: int,
@@ -446,7 +476,10 @@ def _original_utf8_byte_offset(
                         segment,
                         normalized_segment,
                         local_column,
-                        range(len(segment) + 1),
+                        _normalized_prefix_boundary_candidates(
+                            segment,
+                            local_column,
+                        ),
                     )
                     if len(local_boundaries) == 1:
                         original_index = segment_start + local_boundaries[0]

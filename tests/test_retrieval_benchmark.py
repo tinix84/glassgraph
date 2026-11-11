@@ -908,6 +908,30 @@ def test_nfc_byte_mapping_localizes_one_decomposed_segment(
     assert calls < 20
 
 
+def test_nfc_byte_mapping_rejects_reordered_combining_boundary_without_scan(
+    monkeypatch, retrieval_benchmark_mod
+):
+    original_normalize = retrieval_benchmark_mod.unicodedata.normalize
+    calls = 0
+
+    def counting_normalize(form, value):
+        nonlocal calls
+        calls += 1
+        return original_normalize(form, value)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_mod.unicodedata,
+        "normalize",
+        counting_normalize,
+    )
+    text = "e" + "\u0315" * 2_000 + "\u0300" * 2_000
+
+    with pytest.raises(ValueError, match="exact source interval"):
+        retrieval_benchmark_mod._original_utf8_byte_offset(text, 1_000)
+
+    assert calls < 100
+
+
 def test_derive_evidence_rejects_non_markdown_document(
     tmp_path, retrieval_benchmark_mod
 ):

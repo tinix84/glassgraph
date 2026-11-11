@@ -8,6 +8,7 @@ import math
 import re
 import shutil
 import sqlite3
+import subprocess
 import unicodedata
 from collections import Counter
 from datetime import date
@@ -35,6 +36,8 @@ _QmdYamlLoader.yaml_implicit_resolvers = {
         not in (
             "tag:yaml.org,2002:timestamp",
             "tag:yaml.org,2002:bool",
+            "tag:yaml.org,2002:int",
+            "tag:yaml.org,2002:float",
         )
     ]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
@@ -43,6 +46,53 @@ _QmdYamlLoader.add_implicit_resolver(
     "tag:yaml.org,2002:bool",
     re.compile(r"^(?:true|false)$", re.IGNORECASE),
     list("tTfF"),
+)
+
+
+def _construct_yaml12_int(loader, node):
+    value = loader.construct_scalar(node).replace("_", "")
+    sign = -1 if value.startswith("-") else 1
+    unsigned = value[1:] if value[:1] in "+-" else value
+    if unsigned.startswith(("0b", "0B")):
+        return sign * int(unsigned[2:], 2)
+    if unsigned.startswith(("0o", "0O")):
+        return sign * int(unsigned[2:], 8)
+    if unsigned.startswith(("0x", "0X")):
+        return sign * int(unsigned[2:], 16)
+    return int(value, 10)
+
+
+def _construct_yaml12_float(loader, node):
+    value = loader.construct_scalar(node).replace("_", "")
+    lowered = value.lower()
+    if lowered in (".inf", "+.inf"):
+        return math.inf
+    if lowered == "-.inf":
+        return -math.inf
+    if lowered in (".nan", "+.nan", "-.nan"):
+        return math.nan
+    return float(value)
+
+
+_QmdYamlLoader.add_constructor("tag:yaml.org,2002:int", _construct_yaml12_int)
+_QmdYamlLoader.add_constructor("tag:yaml.org,2002:float", _construct_yaml12_float)
+_QmdYamlLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(
+        r"^(?:[-+]?0b[0-1_]+|[-+]?0o[0-7_]+|[-+]?[0-9][0-9_]*|"
+        r"[-+]?0x[0-9a-fA-F_]+)$"
+    ),
+    list("-+0123456789"),
+)
+_QmdYamlLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"^(?:[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)"
+        r"(?:[eE][-+]?[0-9]+)?|"
+        r"[-+]?[0-9][0-9_]*(?:[eE][-+]?[0-9]+)|"
+        r"[-+]?\.(?:inf|Inf|INF)|[-+]?\.(?:nan|NaN|NAN))$"
+    ),
+    list("-+0123456789."),
 )
 
 
@@ -339,7 +389,7 @@ def _qmd_build_receipt_payload(args) -> dict:
     }
 
 
-def write_qmd_build_receipt(path: Path, args) -> None:
+def _write_qmd_build_receipt(path: Path, args) -> None:
     """Record the exact QMD runtime, model, corpus, and index built together."""
     payload = _qmd_build_receipt_payload(args)
     with path.open("x", encoding="utf-8", newline="\n") as target:
@@ -470,7 +520,11 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
                 "WHERE cv.hash = d.hash AND cv.model = ? "
                 "AND cv.embed_fingerprint = ? "
                 "GROUP BY cv.hash, cv.model, cv.embed_fingerprint "
-                "HAVING COUNT(*) = MAX(cv.total_chunks) "
+                "HAVING MIN(cv.total_chunks) = MAX(cv.total_chunks) "
+                "AND COUNT(*) = MAX(cv.total_chunks) "
+                "AND COUNT(DISTINCT cv.seq) = MAX(cv.total_chunks) "
+                "AND MIN(cv.seq) = 0 "
+                "AND MAX(cv.seq) = MAX(cv.total_chunks) - 1 "
                 "AND MAX(cv.total_chunks) > 0"
                 ")",
                 (
@@ -567,27 +621,6 @@ def validate_private_workbook(payload: dict) -> None:
         )
 
 
-def _private_workspace_is_git_ignored(vault_root: Path) -> bool:
-    ignore_file = vault_root / ".gitignore"
-    try:
-        rules = {
-            line.strip()
-            for line in ignore_file.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        }
-    except (OSError, UnicodeError):
-        return False
-    return bool(
-        rules
-        & {
-            ".glassgraph/benchmarks/private/",
-            "/.glassgraph/benchmarks/private/",
-            ".glassgraph/benchmarks/private/**",
-            "/.glassgraph/benchmarks/private/**",
-        }
-    )
-
-
 def _path_chain_has_nested_git(path: Path, vault_root: Path) -> bool:
     current = path
     while current != vault_root:
@@ -597,6 +630,91 @@ def _path_chain_has_nested_git(path: Path, vault_root: Path) -> bool:
             return True
         current = current.parent
     return False
+
+
+def _private_backend_paths(args) -> list[Path]:
+    extra_artifacts = [
+        path.resolve()
+        for path in (getattr(args, "backend_config_artifact", []) or [])
+    ]
+    if args.backend == "grooveseek":
+        knowledge_base = Path(args.knowledge_base).resolve()
+        return [
+            knowledge_base,
+            knowledge_base.parent / ".groove.db",
+            args.groove_config.resolve(),
+            *extra_artifacts,
+        ]
+    return [
+        args.corpus_root.resolve(),
+        args.qmd_config.resolve(),
+        args.qmd_index_db.resolve(),
+        args.qmd_build_receipt.resolve(),
+        *extra_artifacts,
+    ]
+
+
+def _git_command(vault_root: Path, arguments: list[str]):
+    return subprocess.run(
+        ["git", "-C", str(vault_root), *arguments],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+    )
+
+
+def _private_git_paths_are_unpublished(
+    vault_root: Path,
+    workspace: Path,
+    paths: list[Path],
+) -> bool:
+    git_markers = [
+        path / ".git"
+        for path in (vault_root, *vault_root.parents)
+        if (path / ".git").exists()
+    ]
+    if not git_markers:
+        return True
+    try:
+        repository = _git_command(vault_root, ["rev-parse", "--show-toplevel"])
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if repository.returncode != 0:
+        return not (vault_root / ".git").exists()
+    try:
+        repository_root = Path(
+            repository.stdout.decode("utf-8").strip()
+        ).resolve()
+    except (OSError, UnicodeError, ValueError):
+        return False
+    if repository_root != vault_root:
+        return False
+
+    workspace_relative = workspace.relative_to(repository_root).as_posix()
+    tracked = _git_command(
+        repository_root,
+        ["ls-files", "-z", "--", workspace_relative],
+    )
+    if tracked.returncode != 0 or tracked.stdout:
+        return False
+
+    candidates = set(paths)
+    for path in paths:
+        if path.is_dir():
+            candidates.update(item.resolve() for item in path.rglob("*") if item.is_file())
+    for path in candidates:
+        try:
+            relative = path.relative_to(repository_root).as_posix()
+        except ValueError:
+            return False
+        ignored = _git_command(
+            repository_root,
+            ["check-ignore", "-q", "--no-index", "--", relative],
+        )
+        if ignored.returncode != 0:
+            return False
+    return True
 
 
 def _private_paths_are_vault_local(args) -> bool:
@@ -614,20 +732,35 @@ def _private_paths_are_vault_local(args) -> bool:
         vault_root = workspace.parents[3]
         corpus_root = args.benchmark_corpus_root.resolve()
         output_parent = args.output.resolve().parent
+        backend_paths = _private_backend_paths(args)
+        private_paths = [
+            args.queries.resolve(),
+            args.output.resolve(),
+            *backend_paths,
+        ]
         corpus_root.relative_to(vault_root)
         args.output.resolve().relative_to(workspace)
+        for path in backend_paths:
+            path.relative_to(workspace)
         if any(
             _path_chain_has_nested_git(path, vault_root)
-            for path in (workspace, output_parent, corpus_root)
+            for path in (workspace, output_parent, corpus_root, *backend_paths)
         ):
             return False
-        if (vault_root / ".git").exists() and not _private_workspace_is_git_ignored(
-            vault_root
+        if not _private_git_paths_are_unpublished(
+            vault_root,
+            workspace,
+            private_paths,
         ):
             return False
-        if any((path / ".git").exists() for path in vault_root.parents):
-            return False
-    except (IndexError, OSError, ValueError):
+    except (
+        AttributeError,
+        IndexError,
+        OSError,
+        subprocess.SubprocessError,
+        TypeError,
+        ValueError,
+    ):
         return False
     return True
 
@@ -980,7 +1113,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
             path_prefix=args.path_prefix,
             index_db=args.qmd_index_db,
             config_dir=(args.qmd_config.parent if args.qmd_config else None),
-            embed_model=args.retrieval_model_artifact,
+            embed_model=args.retrieval_model_id,
         )
 
     try:

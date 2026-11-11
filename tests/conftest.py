@@ -127,6 +127,11 @@ def retrieval_benchmark_cli_mod():
     return _load("retrieval_benchmark_cli")
 
 
+@pytest.fixture(scope="session")
+def qmd_benchmark_build_mod():
+    return _load("qmd_benchmark_build")
+
+
 @pytest.fixture
 def disambiguation_yaml(tmp_path):
     path = tmp_path / "disambiguation.yaml"

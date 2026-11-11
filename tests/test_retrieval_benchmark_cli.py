@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -307,7 +309,10 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
         "  rerank: local-rerank.gguf\n"
         "flags:\n"
         "  enabled: true\n"
-        "  legacy_word: on\n",
+        "  legacy_word: on\n"
+        "numbers:\n"
+        "  leading_zero_decimal: 0123\n"
+        "  explicit_octal: 0o77\n",
         encoding="utf-8",
     )
     args = SimpleNamespace(qmd_config=config)
@@ -316,6 +321,10 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
 
     assert "on" in payload["collections"]
     assert payload["flags"] == {"enabled": True, "legacy_word": "on"}
+    assert payload["numbers"] == {
+        "leading_zero_decimal": 123,
+        "explicit_octal": 63,
+    }
 
 
 def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
@@ -412,6 +421,24 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
         connection.execute(
             "UPDATE content_vectors SET embed_fingerprint = ?",
             (_expected_qmd_embedding_fingerprint(str(model)),),
+        )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE content_vectors SET seq = 2")
+        connection.execute(
+            "UPDATE vectors_vec_rowids SET id = ?",
+            (document_hash + "_2",),
+        )
+    assert not retrieval_benchmark_cli_mod._qmd_index_is_ready(
+        args,
+        config_payload,
+    )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE content_vectors SET seq = 0")
+        connection.execute(
+            "UPDATE vectors_vec_rowids SET id = ?",
+            (document_hash + "_0",),
         )
 
     with sqlite3.connect(database) as connection:
@@ -872,6 +899,10 @@ def test_private_cli_requires_retrieval_model_identity(
     tmp_path, capsys, retrieval_benchmark_cli_mod
 ):
     workspace = _private_workspace(tmp_path)
+    knowledge_base = workspace / "groove-backend" / "wiki"
+    knowledge_base.mkdir(parents=True)
+    groove_config = workspace / "groove.toml"
+    groove_config.write_text("[search]\n", encoding="utf-8")
     with pytest.raises(SystemExit) as error:
         retrieval_benchmark_cli_mod.main(
             [
@@ -882,7 +913,9 @@ def test_private_cli_requires_retrieval_model_identity(
                 "--groove-executable",
                 "groove",
                 "--knowledge-base",
-                "corpus",
+                    str(knowledge_base),
+                    "--groove-config",
+                    str(groove_config),
                 "--privacy",
                 "private",
                 "--split",
@@ -1154,7 +1187,8 @@ def _private_workspace(tmp_path):
 
 
 def _private_args(workbook_path, output_path, corpus_root):
-    artifact_root = corpus_root.parent / "private-benchmark-artifacts"
+    workspace = workbook_path.parent
+    artifact_root = workspace / "groove-artifacts"
     artifact_root.mkdir(exist_ok=True)
     executable = artifact_root / "groove.exe"
     tokenizer = artifact_root / "tokenizer.json"
@@ -1169,7 +1203,10 @@ def _private_args(workbook_path, output_path, corpus_root):
         (groove_config, "[search]\n"),
     ):
         path.write_text(content, encoding="utf-8")
-    knowledge_base = corpus_root / "wiki"
+    backend_root = workspace / "groove-backend"
+    knowledge_base = backend_root / "wiki"
+    if not knowledge_base.exists():
+        shutil.copytree(corpus_root / "wiki", knowledge_base)
     _write_groove_index(knowledge_base)
     return [
         "--queries",
@@ -1227,7 +1264,13 @@ def _public_groove_args(tmp_path, corpus_root):
     ]
 
 
-def _public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod):
+def _public_qmd_args(
+    tmp_path,
+    corpus_root,
+    retrieval_benchmark_cli_mod,
+    qmd_benchmark_build_mod,
+    command_log=None,
+):
     artifact_root = tmp_path / "public-qmd-artifacts"
     package = artifact_root / "qmd-package"
     script = package / "dist" / "cli" / "qmd.js"
@@ -1310,18 +1353,32 @@ def _public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod):
                 "INSERT INTO vectors_vec_rowids VALUES (?)",
                 (document_hash + "_0",),
             )
-    receipt_args = SimpleNamespace(
-        qmd_script=str(script),
-        qmd_config=config,
-        qmd_index_db=index_db,
-        retrieval_model_id=str(model.resolve()),
-        retrieval_model_artifact=model,
-        corpus_root=corpus_root,
-    )
-    retrieval_benchmark_cli_mod.write_qmd_build_receipt(
-        build_receipt,
-        receipt_args,
-    )
+    def run_build(command, environment):
+        if command_log is not None:
+            command_log.append((command, environment))
+        return {
+            "stdout": "",
+            "stderr": "",
+            "elapsed_ms": 1.0,
+            "peak_working_set_bytes": 1,
+        }
+
+    assert qmd_benchmark_build_mod.main(
+        [
+            "--node-executable", str(node),
+            "--qmd-script", str(script),
+            "--qmd-config", str(config),
+            "--qmd-index-db", str(index_db),
+            "--index", "fixture",
+            "--collection", "fixture",
+            "--corpus-root", str(corpus_root),
+            "--benchmark-corpus-root", str(corpus_root),
+            "--retrieval-model-id", str(model.resolve()),
+            "--retrieval-model-artifact", str(model),
+            "--output", str(build_receipt),
+        ],
+        process_runner=run_build,
+    ) == 0
     return [
         "--node-executable", str(node),
         "--qmd-script", str(script),
@@ -1346,14 +1403,23 @@ def _write_corpus(tmp_path, *, private=False):
 
 
 def test_qmd_build_receipt_detects_model_replacement(
-    tmp_path, retrieval_benchmark_cli_mod
+    tmp_path, retrieval_benchmark_cli_mod, qmd_benchmark_build_mod
 ):
     corpus_root = _write_corpus(tmp_path)
+    commands = []
     backend_args = _public_qmd_args(
         tmp_path,
         corpus_root,
         retrieval_benchmark_cli_mod,
+        qmd_benchmark_build_mod,
+        commands,
     )
+
+    assert [command[0][4] for command in commands] == ["update", "embed"]
+    assert "-f" in commands[1][0]
+    assert commands[1][1]["QMD_EMBED_MODEL"] == backend_args[
+        backend_args.index("--retrieval-model-id") + 1
+    ]
 
     def value(flag):
         return backend_args[backend_args.index(flag) + 1]
@@ -1674,22 +1740,43 @@ def test_private_cli_rejects_report_outside_vault_workspace(
     assert not output_path.exists()
 
 
+def _init_git_repository(path):
+    subprocess.run(
+        ["git", "init", "-q", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _private_boundary_args(workspace, corpus_root, output=None):
+    backend_root = workspace / "groove-backend"
+    knowledge_base = backend_root / "wiki"
+    knowledge_base.mkdir(parents=True, exist_ok=True)
+    config = workspace / "groove.toml"
+    config.write_text("[search]\n", encoding="utf-8")
+    return SimpleNamespace(
+        backend="grooveseek",
+        queries=workspace / "workbook.json",
+        output=output or workspace / "report.json",
+        benchmark_corpus_root=corpus_root,
+        knowledge_base=str(knowledge_base),
+        groove_config=config,
+    )
+
+
 def test_private_workspace_allows_ignored_vault_git_root(
     tmp_path, retrieval_benchmark_cli_mod
 ):
     workspace = _private_workspace(tmp_path)
-    (tmp_path / ".git").mkdir()
+    _init_git_repository(tmp_path)
     (tmp_path / ".gitignore").write_text(
         "/.glassgraph/benchmarks/private/\n",
         encoding="utf-8",
     )
     corpus_root = tmp_path / "wiki"
     corpus_root.mkdir()
-    args = SimpleNamespace(
-        queries=workspace / "workbook.json",
-        output=workspace / "report.json",
-        benchmark_corpus_root=corpus_root,
-    )
+    args = _private_boundary_args(workspace, corpus_root)
 
     assert retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
 
@@ -1702,11 +1789,101 @@ def test_private_workspace_rejects_nested_git_checkout(
     (report_directory / ".git").mkdir(parents=True)
     corpus_root = tmp_path / "wiki"
     corpus_root.mkdir()
-    args = SimpleNamespace(
-        queries=workspace / "workbook.json",
+    args = _private_boundary_args(
+        workspace,
+        corpus_root,
         output=report_directory / "report.json",
-        benchmark_corpus_root=corpus_root,
     )
+
+    assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
+def test_private_workspace_rejects_backend_artifacts_in_public_checkout(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    corpus_root = tmp_path / "wiki"
+    corpus_root.mkdir()
+    public_checkout = tmp_path / ".tools" / "entity_linker"
+    (public_checkout / ".git").mkdir(parents=True)
+    knowledge_base = public_checkout / "private-corpus" / "wiki"
+    knowledge_base.mkdir(parents=True)
+    config = public_checkout / "private-groove.toml"
+    config.write_text("[search]\n", encoding="utf-8")
+    args = SimpleNamespace(
+        backend="grooveseek",
+        queries=workspace / "workbook.json",
+        output=workspace / "report.json",
+        benchmark_corpus_root=corpus_root,
+        knowledge_base=str(knowledge_base),
+        groove_config=config,
+    )
+
+    assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
+def test_private_workspace_rejects_qmd_artifacts_in_public_checkout(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    benchmark_corpus = tmp_path / "wiki"
+    benchmark_corpus.mkdir()
+    public_checkout = tmp_path / ".tools" / "entity_linker"
+    (public_checkout / ".git").mkdir(parents=True)
+    qmd_root = public_checkout / "private-qmd"
+    qmd_root.mkdir()
+    args = SimpleNamespace(
+        backend="qmd",
+        queries=workspace / "workbook.json",
+        output=workspace / "report.json",
+        benchmark_corpus_root=benchmark_corpus,
+        corpus_root=qmd_root / "corpus",
+        qmd_config=qmd_root / "config.yml",
+        qmd_index_db=qmd_root / "index.sqlite",
+        qmd_build_receipt=qmd_root / "receipt.json",
+    )
+
+    assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
+def test_private_workspace_rejects_effective_gitignore_negation(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    _init_git_repository(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        "/.glassgraph/benchmarks/private/**\n"
+        "!/.glassgraph/benchmarks/private/v1/\n"
+        "!/.glassgraph/benchmarks/private/v1/report.json\n",
+        encoding="utf-8",
+    )
+    corpus_root = tmp_path / "wiki"
+    corpus_root.mkdir()
+    args = _private_boundary_args(workspace, corpus_root)
+
+    assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
+def test_private_workspace_rejects_tracked_private_file(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    _init_git_repository(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        "/.glassgraph/benchmarks/private/\n",
+        encoding="utf-8",
+    )
+    workbook = workspace / "workbook.json"
+    workbook.write_text("{}", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "-f", str(workbook)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    corpus_root = tmp_path / "wiki"
+    corpus_root.mkdir()
+    args = _private_boundary_args(workspace, corpus_root)
 
     assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
 
@@ -1806,7 +1983,11 @@ def test_private_evaluation_records_matching_settings_lock(
 
 
 def test_public_cli_runs_qmd_adapter(
-    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    qmd_benchmark_build_mod,
 ):
     queries = _public_queries()
     queries_path = tmp_path / "queries.json"
@@ -1849,7 +2030,12 @@ def test_public_cli_runs_qmd_adapter(
             str(queries_path),
             "--backend",
             "qmd",
-            *_public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod),
+            *_public_qmd_args(
+                tmp_path,
+                corpus_root,
+                retrieval_benchmark_cli_mod,
+                qmd_benchmark_build_mod,
+            ),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -1867,7 +2053,11 @@ def test_public_cli_runs_qmd_adapter(
 
 
 def test_cli_redacts_qmd_out_of_corpus_path(
-    tmp_path, capsys, retrieval_benchmark_cli_mod, retrieval_benchmark_mod
+    tmp_path,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+    qmd_benchmark_build_mod,
 ):
     corpus_root = _write_corpus(tmp_path)
     queries = _public_queries()
@@ -1887,7 +2077,12 @@ def test_cli_redacts_qmd_out_of_corpus_path(
             [
                 "--queries", str(queries_path),
                 "--backend", "qmd",
-                *_public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod),
+                *_public_qmd_args(
+                    tmp_path,
+                    corpus_root,
+                    retrieval_benchmark_cli_mod,
+                    qmd_benchmark_build_mod,
+                ),
                 "--privacy", "public",
                 "--benchmark-corpus-root", str(corpus_root),
                 *MEASUREMENT_ARGS,

@@ -100,7 +100,22 @@ QMD runs require `--qmd-config <index-name>.yml`, `--qmd-index-db <index.sqlite>
 
 The embed value and `--retrieval-model-id` must use the same literal absolute model-file value that QMD stored. The runner independently resolves that value to the pinned artifact. It verifies the stored configuration hash and QMD 2.8.3 embedding fingerprint before retrieval.
 
-Run `qmd embed -f` with the pinned model, then call `write_qmd_build_receipt()` from `retrieval_benchmark_cli.py` before the model, corpus, configuration, or index changes. The write-once receipt binds the QMD package, model bytes, model ID, configuration, corpus documents, and SQLite snapshot. Replacing a GGUF file at the same path therefore invalidates the index.
+Build QMD through `qmd_benchmark_build.py`. This command runs `qmd update` and forced `qmd embed -f` with the pinned literal model ID. It writes the receipt only after the completed index passes the frozen-corpus, chunk, vector, model, and formatter checks. The write-once receipt binds the QMD package, model bytes, model ID, configuration, corpus documents, and SQLite snapshot. Replacing a GGUF file at the same path therefore invalidates the index.
+
+```powershell
+python qmd_benchmark_build.py `
+  --node-executable <node> `
+  --qmd-script <qmd-script> `
+  --qmd-config <index-name>.yml `
+  --qmd-index-db <index.sqlite> `
+  --index <index-name> `
+  --collection <collection-name> `
+  --corpus-root <backend-corpus-copy> `
+  --benchmark-corpus-root <frozen-corpus> `
+  --retrieval-model-id <literal-absolute-model-path> `
+  --retrieval-model-artifact <model.gguf> `
+  --output <new-build-receipt.json>
+```
 
 The selected QMD collection must contain the complete frozen document roster. Every indexed chunk must have its exact `hash_seq` vector key.
 
@@ -131,6 +146,7 @@ history.py       Append-only backfill history with per-run deltas
 retrieval_benchmark.py      Evidence-group metrics shared by all backends
 retrieval_backends.py       GrooveSeek and QMD result adapters
 retrieval_benchmark_cli.py  Local public/private benchmark command
+qmd_benchmark_build.py      Controlled forced QMD build and receipt command
 
 comparison/      Head-to-head comparison framework vs graphify
   load_graphify.py     Defensive parser for graphify graph.json

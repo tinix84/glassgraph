@@ -153,6 +153,7 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
             "peak_working_set_bytes": 654_321,
         }
 
+    model_id = (tmp_path / "model.gguf").as_posix()
     adapter = retrieval_backends_mod.QmdAdapter(
         node_executable="node",
         qmd_script="qmd",
@@ -163,7 +164,7 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
         token_counter=lambda _text: 17,
         index_db=tmp_path / "index.sqlite",
         config_dir=tmp_path / "config",
-        embed_model=tmp_path / "model.gguf",
+        embed_model=model_id,
     )
 
     run = adapter.query("continuous power", limit=5)
@@ -186,7 +187,7 @@ def test_qmd_adapter_normalizes_full_path_and_preserves_score_trace(
     assert invoked["environment"] == {
         "INDEX_PATH": str((tmp_path / "index.sqlite").resolve()),
         "QMD_CONFIG_DIR": str((tmp_path / "config").resolve()),
-        "QMD_EMBED_MODEL": str((tmp_path / "model.gguf").resolve()),
+        "QMD_EMBED_MODEL": model_id,
         "QMD_FORCE_CPU": "1",
         "QMD_EMBED_CONTEXT_SIZE": None,
         "QMD_EMBED_PARALLELISM": None,
