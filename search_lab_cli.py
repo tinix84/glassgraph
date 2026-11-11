@@ -7,6 +7,7 @@ from pathlib import Path
 
 import retrieval_benchmark_cli
 import retrieval_benchmark
+import query_contract
 import search_lab
 
 
@@ -67,12 +68,18 @@ def _trial_run(backend_payload: dict, trial: dict) -> dict:
     entry = backend_payload["trials"].get(trial["id"])
     if (
         not isinstance(entry, dict)
-        or entry.get("query") != trial.get("query")
         or entry.get("role") != trial.get("role")
-        or not isinstance(entry.get("run"), dict)
     ):
         raise ValueError(f"A matching backend run is missing for {trial['id']}")
-    return entry["run"]
+    if isinstance(entry.get("request"), dict) and isinstance(
+        entry.get("response"), dict
+    ):
+        if entry["request"].get("input", {}).get("text") != trial.get("query"):
+            raise ValueError(f"A matching backend run is missing for {trial['id']}")
+        return query_contract.backend_run(entry["request"], entry["response"])
+    if entry.get("query") == trial.get("query") and isinstance(entry.get("run"), dict):
+        return entry["run"]
+    raise ValueError(f"A matching backend run is missing for {trial['id']}")
 
 
 def main(argv=None) -> int:

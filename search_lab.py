@@ -6,6 +6,7 @@ from pathlib import Path
 
 import retrieval_benchmark
 import retrieval_benchmark_cli
+import query_contract
 
 
 class SearchLabError(ValueError):
@@ -279,15 +280,19 @@ def run_trials(session: dict, brief: dict, adapters: dict, *, limit: int) -> dic
             raise SearchLabError("Holdout execution does not match the locked settings")
     runs = {}
     for backend, adapter in adapters.items():
+        settings = _adapter_settings(adapter, limit)
         backend_runs = {}
         for trial in brief.get("questions", []):
+            request = query_contract.search_request(trial["query"], limit=limit)
             backend_runs[trial["id"]] = {
-                "query": trial["query"],
                 "role": trial["role"],
-                "run": adapter.query(trial["query"], limit=limit),
+                "request": request,
+                "response": query_contract.execute_search(
+                    backend, adapter, request, settings=settings
+                ),
             }
         runs[backend] = {
-            "settings": _adapter_settings(adapter, limit),
+            "settings": settings,
             "trials": backend_runs,
         }
     return runs
@@ -315,10 +320,22 @@ def _adapter_settings(adapter, limit: int) -> dict:
             settings[name] = value
             path = Path(value)
             artifact_hash = (
-                retrieval_benchmark_cli._qmd_index_sha256(path)
-                if name == "index_db"
-                else retrieval_benchmark_cli._path_sha256(path)
+                retrieval_benchmark_cli._executable_sha256(str(value))
+                if name in {"executable", "node_executable"}
+                else (
+                    retrieval_benchmark_cli._qmd_package_sha256(str(value))
+                    if name == "qmd_script"
+                    else (
+                        retrieval_benchmark_cli._qmd_index_sha256(path)
+                        if name == "index_db"
+                        else retrieval_benchmark_cli._path_sha256(path)
+                    )
+                )
             )
+            if name in {"executable", "node_executable", "qmd_script"} and (
+                artifact_hash is None
+            ):
+                raise SearchLabError(f"Cannot fingerprint {name}")
             if artifact_hash is not None:
                 settings[f"{name}_sha256"] = artifact_hash
     corpus_root = getattr(adapter, "corpus_root", None)

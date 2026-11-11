@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 
 import pytest
 
@@ -428,6 +430,45 @@ def test_adapter_settings_hash_qmd_index_content(tmp_path, search_lab_mod):
     assert first["index_db_sha256"] != second["index_db_sha256"]
 
 
+def test_adapter_settings_hash_path_resolved_executable(monkeypatch, search_lab_mod):
+    executable = Path(sys.executable)
+    monkeypatch.setenv("PATH", str(executable.parent))
+
+    class Adapter:
+        pass
+
+    Adapter.executable = executable.name
+
+    settings = search_lab_mod._adapter_settings(Adapter(), 5)
+
+    assert settings["executable_sha256"].startswith("sha256:")
+
+
+def test_adapter_settings_hash_qmd_package_content(tmp_path, search_lab_mod):
+    package = tmp_path / "qmd"
+    package.mkdir()
+    (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
+    script = package / "cli.js"
+    script.write_text("first", encoding="utf-8")
+
+    class Adapter:
+        qmd_script = str(script)
+
+    first = search_lab_mod._adapter_settings(Adapter(), 5)
+    script.write_text("second", encoding="utf-8")
+    second = search_lab_mod._adapter_settings(Adapter(), 5)
+
+    assert first["qmd_script_sha256"] != second["qmd_script_sha256"]
+
+
+def test_adapter_settings_refuse_unfingerprinted_executable(search_lab_mod):
+    class Adapter:
+        executable = "glassgraph-missing-executable"
+
+    with pytest.raises(search_lab_mod.SearchLabError, match="fingerprint executable"):
+        search_lab_mod._adapter_settings(Adapter(), 5)
+
+
 def test_same_trials_run_through_each_retrieval_adapter(search_lab_mod):
     calls = []
 
@@ -469,6 +510,63 @@ def test_same_trials_run_through_each_retrieval_adapter(search_lab_mod):
         "development-1",
         "development-2",
     }
+    first = runs["grooveseek"]["trials"]["development-1"]
+    assert first["request"]["schema_version"] == "glassgraph.query.v1"
+    assert first["request"]["operation"] == "search"
+    assert first["response"]["schema_version"] == "glassgraph.query-result.v1"
+    assert first["response"]["request_hash"].startswith("sha256:")
+    assert first["response"]["execution"]["adapter"]["name"] == "grooveseek"
+    assert "run" not in first
+
+
+def test_query_contract_preserves_raw_low_confidence_trace(search_lab_mod):
+    hit = {
+        "path": "wiki/example.md",
+        "heading": "Example",
+        "text": "Exact passage.",
+        "backend_score": {"adapter": "grooveseek", "kind": "rrf", "raw": 0.2},
+        "context_tokens": 3,
+        "explanation": {"kind": "match_spans", "value": [{"start": 0, "end": 5}]},
+        "backend_locator": {"kind": "utf8_match_spans", "value": []},
+    }
+
+    class Adapter:
+        def query(self, query, *, limit):
+            return {
+                "hits": [],
+                "raw_hits": [hit],
+                "abstained": True,
+                "low_confidence": True,
+                "latency_ms": 4.5,
+                "peak_working_set_bytes": 1024,
+            }
+
+    brief = {
+        "topic": "Trace preservation",
+        "questions": [
+            {"id": "development-1", "role": "development", "query": "Why?"}
+        ],
+        "constraints": {"offline": True, "private": True},
+    }
+    runs = search_lab_mod.run_trials(
+        search_lab_mod.new_session(brief),
+        brief,
+        {"grooveseek": Adapter()},
+        limit=5,
+    )
+
+    exchange = runs["grooveseek"]["trials"]["development-1"]
+    response = exchange["response"]
+    assert response["status"] == "abstained"
+    assert response["results"] == []
+    assert response["raw_results"][0]["score"]["backend"]["raw"] == 0.2
+    assert response["raw_results"][0]["backend_trace"]["locator"] == hit[
+        "backend_locator"
+    ]
+
+    changed_request = dict(exchange["request"], limit=10)
+    with pytest.raises(ValueError, match="stored query exchange"):
+        search_lab_mod.query_contract.backend_run(changed_request, response)
 
 
 def test_holdout_adapter_execution_refuses_to_run_before_settings_lock(search_lab_mod):
