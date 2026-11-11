@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,6 +28,33 @@ MEASUREMENT_ARGS = [
     "4096",
     "--offline-verified",
 ]
+
+
+def _expected_qmd_embedding_fingerprint(model: str) -> str:
+    is_qwen = re.search(r"qwen.*embed|embed.*qwen", model, re.IGNORECASE)
+    query = "__qmd_embedding_query_probe__"
+    title = "__qmd_embedding_title_probe__"
+    document = "__qmd_embedding_document_probe__"
+    formatted_query = (
+        f"Instruct: Retrieve relevant documents for the given query\nQuery: {query}"
+        if is_qwen
+        else f"task: search result | query: {query}"
+    )
+    formatted_document = (
+        f"{title}\n{document}"
+        if is_qwen
+        else f"title: {title} | text: {document}"
+    )
+    significant = "\n".join(
+        (
+            f"model:{model}",
+            f"query:{formatted_query}",
+            f"doc:{formatted_document}",
+            "chunk_tokens:900",
+            "chunk_overlap_tokens:135",
+        )
+    )
+    return hashlib.sha256(significant.encode()).hexdigest()[:6]
 
 PUBLIC_ANSWER_ID = "sha256:49f9bfe7dce9a5f1e1c2060cf8d021f034f319ceac3cd88ddf81b0cff9bf4ebf"
 PUBLIC_IRRELEVANT_ID = "sha256:9eef3057700ae1a5c20ebb04e80930ffb1171e72b51a1723dbf2561dd0731725"
@@ -208,11 +236,12 @@ def test_qmd_config_must_use_pinned_model_artifact(
     model = (tmp_path / "model.gguf").resolve()
     model.write_text("GGUF", encoding="utf-8")
     config = tmp_path / "fixture.yml"
+    configured_model = model.as_posix()
     args = SimpleNamespace(
         qmd_config=config,
         index="fixture",
         retrieval_model_artifact=model,
-        retrieval_model_id=str(model),
+        retrieval_model_id=configured_model,
     )
 
     config.write_text("collections: {}\n", encoding="utf-8")
@@ -224,7 +253,7 @@ def test_qmd_config_must_use_pinned_model_artifact(
     assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
 
     config.write_text(
-        f"models:\n  embed: {json.dumps(str(model))}\n"
+        f"models:\n  embed: {json.dumps(configured_model)}\n"
         "  generate: local-generate.gguf\n"
         "  rerank: local-rerank.gguf\n",
         encoding="utf-8",
@@ -259,6 +288,34 @@ def test_qmd_config_parses_yaml_date_like_scalar_as_text(
         args,
         payload,
     )
+
+
+def test_qmd_config_uses_yaml_1_2_boolean_rules(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    model = (tmp_path / "model.gguf").resolve()
+    model.write_text("model", encoding="utf-8")
+    config = tmp_path / "fixture.yml"
+    config.write_text(
+        "collections:\n"
+        "  on:\n"
+        f"    path: {json.dumps(str(tmp_path))}\n"
+        "    pattern: '**/*.md'\n"
+        "models:\n"
+        f"  embed: {json.dumps(str(model))}\n"
+        "  generate: local-generate.gguf\n"
+        "  rerank: local-rerank.gguf\n"
+        "flags:\n"
+        "  enabled: true\n"
+        "  legacy_word: on\n",
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(qmd_config=config)
+
+    payload = retrieval_benchmark_cli_mod._read_qmd_config(args)
+
+    assert "on" in payload["collections"]
+    assert payload["flags"] == {"enabled": True, "legacy_word": "on"}
 
 
 def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
@@ -320,8 +377,12 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             (document_hash,),
         )
         connection.execute(
-            "INSERT INTO content_vectors VALUES (?, 0, ?, 'fixture-fp', 1)",
-            (document_hash, str(model)),
+            "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1)",
+            (
+                document_hash,
+                str(model),
+                _expected_qmd_embedding_fingerprint(str(model)),
+            ),
         )
         connection.execute(
             "INSERT INTO vectors_vec_rowids VALUES (?)",
@@ -337,6 +398,21 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
     )
 
     assert retrieval_benchmark_cli_mod._qmd_index_is_ready(args, config_payload)
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE content_vectors SET embed_fingerprint = 'stale1'"
+        )
+    assert not retrieval_benchmark_cli_mod._qmd_index_is_ready(
+        args,
+        config_payload,
+    )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE content_vectors SET embed_fingerprint = ?",
+            (_expected_qmd_embedding_fingerprint(str(model)),),
+        )
 
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -1151,7 +1227,7 @@ def _public_groove_args(tmp_path, corpus_root):
     ]
 
 
-def _public_qmd_args(tmp_path, corpus_root):
+def _public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod):
     artifact_root = tmp_path / "public-qmd-artifacts"
     package = artifact_root / "qmd-package"
     script = package / "dist" / "cli" / "qmd.js"
@@ -1163,6 +1239,7 @@ def _public_qmd_args(tmp_path, corpus_root):
     model = artifact_root / "model.gguf"
     config = artifact_root / "fixture.yml"
     index_db = artifact_root / "index.sqlite"
+    build_receipt = artifact_root / "qmd-build-receipt.json"
     config_payload = {
         "collections": {"fixture": {"path": str(corpus_root), "pattern": "**/*.md"}},
         "models": {
@@ -1222,18 +1299,35 @@ def _public_qmd_args(tmp_path, corpus_root):
                 (index, relative, document_hash),
             )
             connection.execute(
-                "INSERT INTO content_vectors VALUES (?, 0, ?, 'fixture-fp', 1)",
-                (document_hash, str(model.resolve())),
+                "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1)",
+                (
+                    document_hash,
+                    str(model.resolve()),
+                    _expected_qmd_embedding_fingerprint(str(model.resolve())),
+                ),
             )
             connection.execute(
                 "INSERT INTO vectors_vec_rowids VALUES (?)",
                 (document_hash + "_0",),
             )
+    receipt_args = SimpleNamespace(
+        qmd_script=str(script),
+        qmd_config=config,
+        qmd_index_db=index_db,
+        retrieval_model_id=str(model.resolve()),
+        retrieval_model_artifact=model,
+        corpus_root=corpus_root,
+    )
+    retrieval_benchmark_cli_mod.write_qmd_build_receipt(
+        build_receipt,
+        receipt_args,
+    )
     return [
         "--node-executable", str(node),
         "--qmd-script", str(script),
         "--qmd-config", str(config),
         "--qmd-index-db", str(index_db),
+        "--qmd-build-receipt", str(build_receipt),
         "--index", "fixture",
         "--collection", "fixture",
         "--corpus-root", str(corpus_root),
@@ -1249,6 +1343,35 @@ def _write_corpus(tmp_path, *, private=False):
     document.parent.mkdir(parents=True)
     document.write_text("Exact answer passage. Exact answer.\n", encoding="utf-8")
     return corpus_root
+
+
+def test_qmd_build_receipt_detects_model_replacement(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    corpus_root = _write_corpus(tmp_path)
+    backend_args = _public_qmd_args(
+        tmp_path,
+        corpus_root,
+        retrieval_benchmark_cli_mod,
+    )
+
+    def value(flag):
+        return backend_args[backend_args.index(flag) + 1]
+
+    args = SimpleNamespace(
+        qmd_script=value("--qmd-script"),
+        qmd_config=Path(value("--qmd-config")),
+        qmd_index_db=Path(value("--qmd-index-db")),
+        qmd_build_receipt=Path(value("--qmd-build-receipt")),
+        retrieval_model_id=value("--retrieval-model-id"),
+        retrieval_model_artifact=Path(value("--retrieval-model-artifact")),
+        corpus_root=Path(value("--corpus-root")),
+    )
+    assert retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
+
+    args.retrieval_model_artifact.write_text("replaced weights", encoding="utf-8")
+
+    assert not retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
 
 
 def test_public_cli_prints_aggregate_only(
@@ -1551,6 +1674,43 @@ def test_private_cli_rejects_report_outside_vault_workspace(
     assert not output_path.exists()
 
 
+def test_private_workspace_allows_ignored_vault_git_root(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text(
+        "/.glassgraph/benchmarks/private/\n",
+        encoding="utf-8",
+    )
+    corpus_root = tmp_path / "wiki"
+    corpus_root.mkdir()
+    args = SimpleNamespace(
+        queries=workspace / "workbook.json",
+        output=workspace / "report.json",
+        benchmark_corpus_root=corpus_root,
+    )
+
+    assert retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
+def test_private_workspace_rejects_nested_git_checkout(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    workspace = _private_workspace(tmp_path)
+    report_directory = workspace / "reports"
+    (report_directory / ".git").mkdir(parents=True)
+    corpus_root = tmp_path / "wiki"
+    corpus_root.mkdir()
+    args = SimpleNamespace(
+        queries=workspace / "workbook.json",
+        output=report_directory / "report.json",
+        benchmark_corpus_root=corpus_root,
+    )
+
+    assert not retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+
+
 @pytest.mark.parametrize(
     "invalid_case",
     ["missing", "mismatch", "changed-settings", "malformed-lock-map"],
@@ -1689,7 +1849,7 @@ def test_public_cli_runs_qmd_adapter(
             str(queries_path),
             "--backend",
             "qmd",
-            *_public_qmd_args(tmp_path, corpus_root),
+            *_public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod),
             "--privacy",
             "public",
             "--benchmark-corpus-root",
@@ -1727,7 +1887,7 @@ def test_cli_redacts_qmd_out_of_corpus_path(
             [
                 "--queries", str(queries_path),
                 "--backend", "qmd",
-                *_public_qmd_args(tmp_path, corpus_root),
+                *_public_qmd_args(tmp_path, corpus_root, retrieval_benchmark_cli_mod),
                 "--privacy", "public",
                 "--benchmark-corpus-root", str(corpus_root),
                 *MEASUREMENT_ARGS,
@@ -2241,6 +2401,55 @@ def test_cli_redacts_private_report_write_failure(
     assert error.value.code == 2
     assert str(output_path) not in stderr
     assert "Private benchmark report could not be written" in stderr
+
+
+def test_cli_redacts_final_private_corpus_scan_failure(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    retrieval_benchmark_cli_mod,
+    retrieval_benchmark_mod,
+):
+    corpus_root = _write_corpus(tmp_path, private=True)
+    workspace = _private_workspace(tmp_path)
+    workbook_path = workspace / "authoring-workbook.json"
+    output_path = workspace / "private-report.json"
+    workbook_path.write_text(
+        json.dumps(_private_payload(retrieval_benchmark_mod, corpus_root)),
+        encoding="utf-8",
+    )
+    original_snapshot_hash = retrieval_benchmark_mod.corpus_snapshot_hash
+    calls = 0
+
+    def fail_final_scan(root):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError(f"private path escaped: {corpus_root}")
+        return original_snapshot_hash(root)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_mod,
+        "corpus_snapshot_hash",
+        fail_final_scan,
+    )
+
+    with pytest.raises(SystemExit) as error:
+        retrieval_benchmark_cli_mod.main(
+            _private_args(workbook_path, output_path, corpus_root),
+            process_runner=lambda *_args: {
+                "stdout": json.dumps({"results": [], "low_confidence": False}),
+                "elapsed_ms": 1.0,
+                "peak_working_set_bytes": 1000,
+            },
+            token_counter=lambda _text: 0,
+        )
+
+    stderr = capsys.readouterr().err
+    assert error.value.code == 2
+    assert str(corpus_root) not in stderr
+    assert "Benchmark corpus could not be fingerprinted" in stderr
+    assert not output_path.exists()
 
 
 def test_private_cli_rejects_unexpected_distribution_bucket(

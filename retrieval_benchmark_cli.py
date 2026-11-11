@@ -31,10 +31,19 @@ _QmdYamlLoader.yaml_implicit_resolvers = {
     key: [
         (tag, pattern)
         for tag, pattern in resolvers
-        if tag != "tag:yaml.org,2002:timestamp"
+        if tag
+        not in (
+            "tag:yaml.org,2002:timestamp",
+            "tag:yaml.org,2002:bool",
+        )
     ]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
+_QmdYamlLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|false)$", re.IGNORECASE),
+    list("tTfF"),
+)
 
 
 def _valid_judgment(passage: object, grades: set[str]) -> bool:
@@ -201,6 +210,7 @@ def _backend_settings_payload(args) -> dict:
         }
     qmd_config = getattr(args, "qmd_config", None)
     qmd_index_db = getattr(args, "qmd_index_db", None)
+    qmd_build_receipt = getattr(args, "qmd_build_receipt", None)
     return {
         **common,
         "node_executable": args.node_executable,
@@ -216,6 +226,7 @@ def _backend_settings_payload(args) -> dict:
             "qmd_package": _qmd_package_sha256(args.qmd_script),
             "qmd_config": _file_sha256(qmd_config),
             "index": _qmd_index_sha256(qmd_index_db),
+            "build_receipt": _file_sha256(qmd_build_receipt),
         },
     }
 
@@ -248,8 +259,35 @@ def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
     return (
         configured_path.is_absolute()
         and configured_path.resolve() == args.retrieval_model_artifact.resolve()
-        and args.retrieval_model_id == str(configured_path.resolve())
+        and args.retrieval_model_id == configured
     )
+
+
+def _qmd_embedding_fingerprint(model: str) -> str:
+    is_qwen = re.search(r"qwen.*embed|embed.*qwen", model, re.IGNORECASE)
+    query = "__qmd_embedding_query_probe__"
+    title = "__qmd_embedding_title_probe__"
+    document = "__qmd_embedding_document_probe__"
+    formatted_query = (
+        f"Instruct: Retrieve relevant documents for the given query\nQuery: {query}"
+        if is_qwen
+        else f"task: search result | query: {query}"
+    )
+    formatted_document = (
+        f"{title}\n{document}"
+        if is_qwen
+        else f"title: {title} | text: {document}"
+    )
+    significant = "\n".join(
+        (
+            f"model:{model}",
+            f"query:{formatted_query}",
+            f"doc:{formatted_document}",
+            "chunk_tokens:900",
+            "chunk_overlap_tokens:135",
+        )
+    )
+    return hashlib.sha256(significant.encode()).hexdigest()[:6]
 
 
 def _corpus_documents(root: Path, path_prefix: str | None = None) -> dict:
@@ -282,6 +320,47 @@ def _backend_source_matches_benchmark(args, backend_root: Path) -> bool:
     } == {
         path: item["normalized_hash"] for path, item in benchmark_documents.items()
     }
+
+
+def _qmd_build_receipt_payload(args) -> dict:
+    return {
+        "schema_version": "glassgraph.qmd-build-receipt.v1",
+        "qmd_package_sha256": _qmd_package_sha256(args.qmd_script),
+        "qmd_config_sha256": _file_sha256(args.qmd_config),
+        "qmd_index_sha256": _qmd_index_sha256(args.qmd_index_db),
+        "retrieval_model_id": args.retrieval_model_id,
+        "retrieval_model_artifact_sha256": _path_sha256(
+            args.retrieval_model_artifact
+        ),
+        "corpus_documents": {
+            path: item["raw_hash"]
+            for path, item in _corpus_documents(args.corpus_root).items()
+        },
+    }
+
+
+def write_qmd_build_receipt(path: Path, args) -> None:
+    """Record the exact QMD runtime, model, corpus, and index built together."""
+    payload = _qmd_build_receipt_payload(args)
+    with path.open("x", encoding="utf-8", newline="\n") as target:
+        json.dump(payload, target, ensure_ascii=False, indent=2, sort_keys=True)
+        target.write("\n")
+
+
+def _qmd_build_receipt_is_valid(args) -> bool:
+    try:
+        payload = json.loads(args.qmd_build_receipt.read_text(encoding="utf-8"))
+        return payload == _qmd_build_receipt_payload(args)
+    except (
+        AttributeError,
+        json.JSONDecodeError,
+        OSError,
+        sqlite3.Error,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ):
+        return False
 
 
 def _groove_index_is_ready(args) -> bool:
@@ -349,6 +428,9 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
             path: item["raw_hash"]
             for path, item in _corpus_documents(source_root).items()
         }
+        expected_fingerprint = _qmd_embedding_fingerprint(
+            args.retrieval_model_id
+        )
         uri = args.qmd_index_db.resolve().as_uri() + "?mode=ro"
         with sqlite3.connect(uri, uri=True) as connection:
             tables = {
@@ -386,20 +468,27 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
                 "AND EXISTS ("
                 "SELECT 1 FROM content_vectors AS cv "
                 "WHERE cv.hash = d.hash AND cv.model = ? "
-                "AND cv.embed_fingerprint <> '' "
+                "AND cv.embed_fingerprint = ? "
                 "GROUP BY cv.hash, cv.model, cv.embed_fingerprint "
                 "HAVING COUNT(*) = MAX(cv.total_chunks) "
                 "AND MAX(cv.total_chunks) > 0"
                 ")",
-                (args.collection, args.retrieval_model_id),
+                (
+                    args.collection,
+                    args.retrieval_model_id,
+                    expected_fingerprint,
+                ),
             ).fetchone()[0]
-            fingerprints = connection.execute(
-                "SELECT COUNT(DISTINCT cv.embed_fingerprint) "
-                "FROM content_vectors AS cv WHERE cv.model = ? AND EXISTS ("
-                "SELECT 1 FROM documents AS d WHERE d.hash = cv.hash "
-                "AND d.collection = ? AND d.active = 1"
-                ")",
-                (args.retrieval_model_id, args.collection),
+            unexpected_vectors = connection.execute(
+                "SELECT COUNT(*) FROM content_vectors AS cv "
+                "JOIN documents AS d ON d.hash = cv.hash "
+                "WHERE d.collection = ? AND d.active = 1 "
+                "AND (cv.model <> ? OR cv.embed_fingerprint <> ?)",
+                (
+                    args.collection,
+                    args.retrieval_model_id,
+                    expected_fingerprint,
+                ),
             ).fetchone()[0]
             missing_vectors = connection.execute(
                 "SELECT COUNT(*) FROM content_vectors AS cv "
@@ -407,15 +496,20 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
                 "LEFT JOIN vectors_vec_rowids AS vr "
                 "ON vr.id = cv.hash || '_' || cv.seq "
                 "WHERE d.collection = ? AND d.active = 1 AND cv.model = ? "
+                "AND cv.embed_fingerprint = ? "
                 "AND vr.id IS NULL",
-                (args.collection, args.retrieval_model_id),
+                (
+                    args.collection,
+                    args.retrieval_model_id,
+                    expected_fingerprint,
+                ),
             ).fetchone()[0]
     except (OSError, sqlite3.Error, TypeError, ValueError):
         return False
     return (
         bool(expected_documents)
         and covered_documents == len(expected_documents)
-        and fingerprints == 1
+        and unexpected_vectors == 0
         and missing_vectors == 0
     )
 
@@ -473,6 +567,38 @@ def validate_private_workbook(payload: dict) -> None:
         )
 
 
+def _private_workspace_is_git_ignored(vault_root: Path) -> bool:
+    ignore_file = vault_root / ".gitignore"
+    try:
+        rules = {
+            line.strip()
+            for line in ignore_file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except (OSError, UnicodeError):
+        return False
+    return bool(
+        rules
+        & {
+            ".glassgraph/benchmarks/private/",
+            "/.glassgraph/benchmarks/private/",
+            ".glassgraph/benchmarks/private/**",
+            "/.glassgraph/benchmarks/private/**",
+        }
+    )
+
+
+def _path_chain_has_nested_git(path: Path, vault_root: Path) -> bool:
+    current = path
+    while current != vault_root:
+        if (current / ".git").exists():
+            return True
+        if current.parent == current:
+            return True
+        current = current.parent
+    return False
+
+
 def _private_paths_are_vault_local(args) -> bool:
     try:
         workspace = args.queries.resolve().parent
@@ -486,9 +612,20 @@ def _private_paths_are_vault_local(args) -> bool:
         if str(workspace.anchor).startswith("\\\\"):
             return False
         vault_root = workspace.parents[3]
-        args.benchmark_corpus_root.resolve().relative_to(vault_root)
+        corpus_root = args.benchmark_corpus_root.resolve()
+        output_parent = args.output.resolve().parent
+        corpus_root.relative_to(vault_root)
         args.output.resolve().relative_to(workspace)
-        if any((path / ".git").exists() for path in (vault_root, *vault_root.parents)):
+        if any(
+            _path_chain_has_nested_git(path, vault_root)
+            for path in (workspace, output_parent, corpus_root)
+        ):
+            return False
+        if (vault_root / ".git").exists() and not _private_workspace_is_git_ignored(
+            vault_root
+        ):
+            return False
+        if any((path / ".git").exists() for path in vault_root.parents):
             return False
     except (IndexError, OSError, ValueError):
         return False
@@ -615,6 +752,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--qmd-script")
     parser.add_argument("--qmd-config", type=Path)
     parser.add_argument("--qmd-index-db", type=Path)
+    parser.add_argument("--qmd-build-receipt", type=Path)
     parser.add_argument("--index")
     parser.add_argument("--collection")
     parser.add_argument("--corpus-root", type=Path)
@@ -756,11 +894,12 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
     if args.backend == "qmd" and (
         args.qmd_config is None
         or args.qmd_index_db is None
+        or args.qmd_build_receipt is None
         or not args.retrieval_model_artifact.is_file()
     ):
         parser.error(
             "QMD benchmarks require --qmd-config, --qmd-index-db, "
-            "and a model file"
+            "--qmd-build-receipt, and a model file"
         )
     if args.backend == "qmd":
         try:
@@ -774,6 +913,11 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         if not model_is_pinned:
             parser.error(
                 "The QMD configuration must use the pinned model artifact"
+            )
+        if not _qmd_build_receipt_is_valid(args):
+            parser.error(
+                "The QMD build receipt does not match the runtime, model, "
+                "corpus, and index"
             )
         if not _qmd_index_is_ready(args, qmd_config_payload):
             parser.error(
@@ -872,7 +1016,7 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         final_corpus_hash = retrieval_benchmark.corpus_snapshot_hash(
             args.benchmark_corpus_root
         )
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError, ValueError):
         parser.error("Benchmark corpus could not be fingerprinted")
     if final_corpus_hash != payload["manifest"]["corpus_snapshot_hash"]:
         parser.error("Benchmark corpus changed during execution")

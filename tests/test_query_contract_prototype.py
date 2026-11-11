@@ -58,9 +58,9 @@ def test_query_contract_verifies_exact_fixture_evidence_only():
         "glassgraph:assertion:v1",
         {
             "evidence_ids": [golden["vendor_evidence_id"]],
-            "object": {"kind": "entity", "id": tesla_entity_id},
+            "object": {"kind": "entity", "id": golden["entity_id"]},
             "predicate_id": predicate_id,
-            "subject_id": golden["entity_id"],
+            "subject_id": tesla_entity_id,
         },
     )
     expected = {
@@ -70,6 +70,7 @@ def test_query_contract_verifies_exact_fixture_evidence_only():
         "byte_end": byte_start + len(passage),
         "vendor_evidence_id": golden["vendor_evidence_id"],
         "vendor_entity_id": tesla_entity_id,
+        "product_entity_id": golden["entity_id"],
         "vendor_predicate_id": predicate_id,
         "path_assertion_id": assertion_id,
     }
@@ -124,8 +125,14 @@ const typedPath = QueryContract.execute('groove', 'fresh', 'path');
 const edge = typedPath.results[0].steps.find(step => step.kind === 'edge').edge;
 if (edge.id !== expected.path_assertion_id) throw new Error('typed path used the wrong assertion ID');
 if (edge.predicate_id !== expected.vendor_predicate_id || edge.predicate_key !== 'vendor_of') throw new Error('typed path used the wrong predicate');
-if (edge.object.id !== expected.vendor_entity_id) throw new Error('typed path used the wrong vendor');
+if (edge.subject_id !== expected.vendor_entity_id) throw new Error('typed path used the wrong vendor subject');
+if (edge.object.id !== expected.product_entity_id) throw new Error('typed path used the wrong product object');
+if (edge.direction !== 'reverse') throw new Error('product-to-vendor traversal was not reverse');
 if (edge.evidence_ids.length !== 1 || edge.evidence_ids[0] !== expected.vendor_evidence_id) throw new Error('typed path used unrelated evidence');
+
+const relatedRequest = QueryContract.requestFor('related');
+if (!relatedRequest.filters.page_types.includes('company')) throw new Error('related result violates the page type filter');
+if (!relatedRequest.filters.page_types.includes('product')) throw new Error('related source violates the page type filter');
 
 for (const operation of ['related', 'path']) {{
   const staleGraph = QueryContract.execute('groove', 'stale', operation);

@@ -570,6 +570,47 @@ def test_validate_evidence_judgments_rejects_wrong_adr_0013_id(
         retrieval_benchmark_mod.validate_evidence_judgments(queries, tmp_path)
 
 
+def test_evidence_validation_reuses_one_canonical_corpus_map(
+    tmp_path, monkeypatch, retrieval_benchmark_mod
+):
+    (tmp_path / "answer.md").write_text(
+        "# Answer\n\nFirst answer.\n\nSecond answer.\n",
+        encoding="utf-8",
+    )
+    judgments = []
+    for text in ("First answer.", "Second answer."):
+        judgment = {"path": "answer.md", "text": text, "grade": "direct"}
+        judgment["evidence_id"] = retrieval_benchmark_mod.derive_evidence_records(
+            tmp_path,
+            judgment,
+        )[0]["evidence_id"]
+        judgments.append(judgment)
+    queries = [{"id": "q1", "query": "answers", "required_groups": [judgments]}]
+    original = retrieval_benchmark_mod._corpus_markdown_paths
+    calls = 0
+
+    def counting_paths(root):
+        nonlocal calls
+        calls += 1
+        return original(root)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_mod,
+        "_corpus_markdown_paths",
+        counting_paths,
+    )
+
+    retrieval_benchmark_mod.validate_evidence_judgments(queries, tmp_path)
+
+    assert calls == 1
+
+    calls = 0
+    runs = {"q1": {"hits": [], "raw_hits": []}}
+    retrieval_benchmark_mod.verify_evidence_hits(queries, runs, tmp_path)
+
+    assert calls == 1
+
+
 def test_benchmark_version_changes_with_judgment_correction(retrieval_benchmark_mod):
     original = [{"id": "q1", "required_groups": []}]
     corrected = [{
@@ -841,6 +882,30 @@ def test_nfc_byte_mapping_uses_linear_fast_path(monkeypatch, retrieval_benchmark
 
     assert offset == 60_000
     assert calls == 1
+
+
+def test_nfc_byte_mapping_localizes_one_decomposed_segment(
+    monkeypatch, retrieval_benchmark_mod
+):
+    original_normalize = retrieval_benchmark_mod.unicodedata.normalize
+    calls = 0
+
+    def counting_normalize(form, value):
+        nonlocal calls
+        calls += 1
+        return original_normalize(form, value)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_mod.unicodedata,
+        "normalize",
+        counting_normalize,
+    )
+    text = "漢" * 40_000 + "e\u0301"
+
+    offset = retrieval_benchmark_mod._original_utf8_byte_offset(text, 20_000)
+
+    assert offset == 60_000
+    assert calls < 20
 
 
 def test_derive_evidence_rejects_non_markdown_document(

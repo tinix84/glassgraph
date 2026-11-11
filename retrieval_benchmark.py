@@ -342,6 +342,59 @@ def _physical_lines(text: str):
         yield text[start:], ""
 
 
+def _hangul_pair_can_compose(left: str, right: str) -> bool:
+    left_code = ord(left)
+    right_code = ord(right)
+    left_is_l = 0x1100 <= left_code <= 0x1112 or 0xA960 <= left_code <= 0xA97C
+    right_is_v = 0x1161 <= right_code <= 0x1175 or 0xD7B0 <= right_code <= 0xD7C6
+    left_is_v = 0x1161 <= left_code <= 0x1175 or 0xD7B0 <= left_code <= 0xD7C6
+    right_is_t = 0x11A8 <= right_code <= 0x11C2 or 0xD7CB <= right_code <= 0xD7FB
+    left_is_lv = (
+        0xAC00 <= left_code <= 0xD7A3
+        and (left_code - 0xAC00) % 28 == 0
+    )
+    return (left_is_l and right_is_v) or (
+        (left_is_v or left_is_lv) and right_is_t
+    )
+
+
+def _normalization_segments(content: str):
+    start = 0
+    for index in range(1, len(content)):
+        current = content[index]
+        if unicodedata.combining(current) != 0:
+            continue
+        previous = content[index - 1]
+        if _hangul_pair_can_compose(previous, current):
+            continue
+        if unicodedata.category(current).startswith("M") and (
+            unicodedata.normalize("NFC", previous + current)
+            != unicodedata.normalize("NFC", previous)
+            + unicodedata.normalize("NFC", current)
+        ):
+            continue
+        yield start, index
+        start = index
+    yield start, len(content)
+
+
+def _exact_normalized_boundaries(
+    content: str,
+    normalized_content: str,
+    normalized_offset: int,
+    candidates,
+) -> list[int]:
+    target_prefix = normalized_content[:normalized_offset]
+    target_suffix = normalized_content[normalized_offset:]
+    return [
+        index
+        for index in candidates
+        if 0 <= index <= len(content)
+        and unicodedata.normalize("NFC", content[:index]) == target_prefix
+        and unicodedata.normalize("NFC", content[index:]) == target_suffix
+    ]
+
+
 def _original_utf8_byte_offset(
     original_text: str,
     normalized_offset: int,
@@ -356,16 +409,52 @@ def _original_utf8_byte_offset(
             column = normalized_offset - normalized_cursor
             if unicodedata.is_normalized("NFC", content):
                 return byte_cursor + len(content[:column].encode("utf-8"))
-            target_prefix = normalized_content[:column]
-            target_suffix = normalized_content[column:]
-            boundaries = [
-                index
-                for index in range(len(content) + 1)
-                if unicodedata.normalize("NFC", content[:index]) == target_prefix
-                and unicodedata.normalize("NFC", content[index:]) == target_suffix
-            ]
+            proportional = (
+                round(column * len(content) / len(normalized_content))
+                if normalized_content
+                else 0
+            )
+            nearby = {
+                column + delta
+                for delta in range(-2, 3)
+            } | {
+                proportional + delta
+                for delta in range(-2, 3)
+            }
+            boundaries = _exact_normalized_boundaries(
+                content,
+                normalized_content,
+                column,
+                sorted(nearby),
+            )
             if len(boundaries) == 1:
                 return byte_cursor + len(content[: boundaries[0]].encode("utf-8"))
+            if len(boundaries) > 1:
+                raise ValueError(
+                    "Normalized evidence coordinate has no exact source interval"
+                )
+            segment_normalized_cursor = 0
+            for segment_start, segment_end in _normalization_segments(content):
+                segment = content[segment_start:segment_end]
+                normalized_segment = unicodedata.normalize("NFC", segment)
+                segment_content_end = (
+                    segment_normalized_cursor + len(normalized_segment)
+                )
+                if column <= segment_content_end:
+                    local_column = column - segment_normalized_cursor
+                    local_boundaries = _exact_normalized_boundaries(
+                        segment,
+                        normalized_segment,
+                        local_column,
+                        range(len(segment) + 1),
+                    )
+                    if len(local_boundaries) == 1:
+                        original_index = segment_start + local_boundaries[0]
+                        return byte_cursor + len(
+                            content[:original_index].encode("utf-8")
+                        )
+                    break
+                segment_normalized_cursor = segment_content_end
             raise ValueError(
                 "Normalized evidence coordinate has no exact source interval"
             )
@@ -383,13 +472,17 @@ def _original_utf8_byte_offset(
 def derive_evidence_records(
     corpus_root: str | Path,
     judgment: dict,
+    *,
+    document_paths: dict[str, Path] | None = None,
 ) -> list[dict]:
     """Derive every ADR-0013 identity for an exact judged passage occurrence."""
     root = Path(corpus_root).resolve()
     canonical_path = _canonical_document_path(judgment["path"])
     if PurePosixPath(canonical_path).suffix != ".md":
         raise ValueError("Evidence judgment is outside the frozen Markdown corpus")
-    source_path = dict(_corpus_markdown_paths(root)).get(canonical_path)
+    if document_paths is None:
+        document_paths = dict(_corpus_markdown_paths(root))
+    source_path = document_paths.get(canonical_path)
     if source_path is None:
         raise ValueError("Evidence judgment path is outside the corpus")
     source_bytes = source_path.read_bytes()
@@ -476,11 +569,17 @@ def derive_evidence_records(
 
 def validate_evidence_judgments(records: list[dict], corpus_root: str | Path) -> None:
     """Reject benchmark judgments that are not valid ADR-0013 evidence identities."""
+    root = Path(corpus_root).resolve()
+    document_paths = dict(_corpus_markdown_paths(root))
     for query in records:
         judgments = _passages(query.get("required_groups", []))
         judgments.extend(query.get("irrelevant") or [])
         for judgment in judgments:
-            derived = derive_evidence_records(corpus_root, judgment)
+            derived = derive_evidence_records(
+                root,
+                judgment,
+                document_paths=document_paths,
+            )
             matching = [
                 record
                 for record in derived
@@ -498,11 +597,16 @@ def verify_evidence_hits(
 ) -> None:
     """Attach only ADR-0013 evidence IDs proven by exact source coordinates."""
     root = Path(corpus_root).resolve()
+    document_paths = dict(_corpus_markdown_paths(root))
     for query in queries:
         passages = _passages(query.get("required_groups", []))
         judgments = []
         for passage in passages:
-            records = derive_evidence_records(root, passage)
+            records = derive_evidence_records(
+                root,
+                passage,
+                document_paths=document_paths,
+            )
             selected = [
                 record
                 for record in records

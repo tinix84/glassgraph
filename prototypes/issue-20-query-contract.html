@@ -90,7 +90,7 @@
         vendorEvidence: 'sha256:adf446220c2e9d5e8457c465958106fc45bd6fb537bbfde287f3f263a9938e63',
         entity: 'sha256:005978a8226640847ab6bc98006031511f54b2970455fba0531147565bec1f33',
         entityB: 'sha256:ac1d4b4eb4b28981be9bb4db7ba51698eabb86fbb3f93245730ceac874ba11a6',
-        assertion: 'sha256:1bfcce859602ef3946ae5615aec1abf85555a2b717c933892d19e052484b0c89',
+        assertion: 'sha256:3fa3647613b63072a11f27579a51e6a27c729895b57c8d6b0657596da0e836ae',
         predicate: 'sha256:1e69314758fdbe7548d7e3dbf091a3e73a72de6e522b2b4d2acac16d5c9e625b',
         corpus: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         backend: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -115,7 +115,7 @@
       function requestFor(operation) {
         const common = {
           schema_version: 'glassgraph.query.v1', operation, limit: 5,
-          filters: { page_types:['technology','product'], paths:['wiki/**'], tags_any:[], updated_from:null }
+          filters: { page_types:['company','product'], paths:['wiki/**'], tags_any:[], updated_from:null }
         };
         if (operation === 'search') return { ...common, input:{ text:'What evidence appears under the Unicode heading?' } };
         if (operation === 'similar') return { ...common, input:{ evidence_id:IDS.evidence } };
@@ -168,12 +168,12 @@
 
       function graphResult(operation, indexState) {
         if (operation === 'related') {
-          return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, subject_id:IDS.entity, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entityB }, evidence_ids:[IDS.vendorEvidence] }, score:null };
+          return { result_id:'result:1', kind:'related_assertion', rank:1, node:{ kind:'entity', id:IDS.entityB }, assertion:{ id:IDS.assertion, subject_id:IDS.entityB, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entity }, evidence_ids:[IDS.vendorEvidence] }, score:null };
         }
         if (operation === 'path') {
           return { result_id:'result:1', kind:'typed_path', rank:1, steps:[
             { kind:'node', node:{ kind:'entity', id:IDS.entity } },
-            { kind:'edge', edge:{ kind:'assertion', id:IDS.assertion, subject_id:IDS.entity, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entityB }, evidence_ids:[IDS.vendorEvidence], direction:'forward' } },
+            { kind:'edge', edge:{ kind:'assertion', id:IDS.assertion, subject_id:IDS.entityB, predicate_id:IDS.predicate, predicate_key:'vendor_of', object:{ kind:'entity', id:IDS.entity }, evidence_ids:[IDS.vendorEvidence], direction:'reverse' } },
             { kind:'node', node:{ kind:'entity', id:IDS.entityB } }
           ], score:null };
         }

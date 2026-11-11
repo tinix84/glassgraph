@@ -96,9 +96,11 @@ GrooveSeek runs pass the pinned model with `--model`. They also set `FASTEMBED_C
 
 The runner compares the GrooveSeek document roster and content hashes with the frozen corpus. It also requires one indexed chunk and vector for each document.
 
-QMD runs require `--qmd-config <index-name>.yml` and `--qmd-index-db <index.sqlite>`. The configuration must define `models.embed`, `models.generate`, and `models.rerank`.
+QMD runs require `--qmd-config <index-name>.yml`, `--qmd-index-db <index.sqlite>`, and `--qmd-build-receipt <receipt.json>`. The configuration must define `models.embed`, `models.generate`, and `models.rerank`.
 
-The embed value and `--retrieval-model-id` must name the same absolute model file. The runner verifies the stored configuration hash before retrieval. It also verifies the stored model and embedding fingerprint.
+The embed value and `--retrieval-model-id` must use the same literal absolute model-file value that QMD stored. The runner independently resolves that value to the pinned artifact. It verifies the stored configuration hash and QMD 2.8.3 embedding fingerprint before retrieval.
+
+Run `qmd embed -f` with the pinned model, then call `write_qmd_build_receipt()` from `retrieval_benchmark_cli.py` before the model, corpus, configuration, or index changes. The write-once receipt binds the QMD package, model bytes, model ID, configuration, corpus documents, and SQLite snapshot. Replacing a GGUF file at the same path therefore invalidates the index.
 
 The selected QMD collection must contain the complete frozen document roster. Every indexed chunk must have its exact `hash_seq` vector key.
 
@@ -106,7 +108,7 @@ The runner pins `INDEX_PATH`, `QMD_CONFIG_DIR`, and `QMD_EMBED_MODEL`. It clears
 
 The public command requires at least five positive and five negative queries. It prints aggregate metrics only.
 
-The private workbook and report must stay under the vault-side `.glassgraph/benchmarks/private/v1/` directory. The vault root must not be a Git worktree or network share.
+The private workbook and report must stay under the vault-side `.glassgraph/benchmarks/private/v1/` directory on a local drive. If the vault has Git metadata, `/.glassgraph/benchmarks/private/` must be explicitly ignored. A private input, corpus, or report inside a nested Git checkout is rejected.
 
 The private command writes its aggregate report to a new file in that directory. It prints no benchmark data. It never replaces an existing file.
 
