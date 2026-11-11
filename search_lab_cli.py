@@ -64,7 +64,13 @@ def _paths_are_private(args) -> bool:
         return False
 
 
-def _trial_run(backend_payload: dict, trial: dict) -> dict:
+def _trial_run(
+    backend_payload: dict,
+    trial: dict,
+    *,
+    backend: str,
+    locked_settings: dict,
+) -> dict:
     entry = backend_payload["trials"].get(trial["id"])
     if (
         not isinstance(entry, dict)
@@ -74,12 +80,27 @@ def _trial_run(backend_payload: dict, trial: dict) -> dict:
     if isinstance(entry.get("request"), dict) and isinstance(
         entry.get("response"), dict
     ):
-        if entry["request"].get("input", {}).get("text") != trial.get("query"):
-            raise ValueError(f"A matching backend run is missing for {trial['id']}")
+        request = entry["request"]
+        response = entry["response"]
+        execution = response.get("execution")
+        adapter = execution.get("adapter") if isinstance(execution, dict) else None
+        index = response.get("index")
+        if (
+            request.get("input", {}).get("text") != trial.get("query")
+            or request.get("limit") != locked_settings.get("limit")
+            or not isinstance(adapter, dict)
+            or adapter.get("name") != backend
+            or execution.get("backend_snapshot_hash")
+            != query_contract.backend_snapshot_hash(locked_settings)
+            or not isinstance(index, dict)
+            or index.get("corpus_snapshot_hash")
+            != locked_settings.get("corpus_snapshot_hash")
+        ):
+            raise ValueError(
+                f"The stored result does not match the locked backend for {trial['id']}"
+            )
         return query_contract.backend_run(entry["request"], entry["response"])
-    if entry.get("query") == trial.get("query") and isinstance(entry.get("run"), dict):
-        return entry["run"]
-    raise ValueError(f"A matching backend run is missing for {trial['id']}")
+    raise ValueError(f"A versioned query exchange is missing for {trial['id']}")
 
 
 def main(argv=None) -> int:
@@ -129,7 +150,12 @@ def main(argv=None) -> int:
             ):
                 raise ValueError(f"Backend runs do not match the lock for {backend}")
             for trial in brief["questions"]:
-                run = _trial_run(backend_payload, trial)
+                run = _trial_run(
+                    backend_payload,
+                    trial,
+                    backend=backend,
+                    locked_settings=locked_settings,
+                )
                 comparison = search_lab.compare_trial(trial, run, args.corpus_root)
                 comparison["backend"] = backend
                 comparisons.append(comparison)
@@ -143,7 +169,12 @@ def main(argv=None) -> int:
                 raise ValueError("The holdout brief can contain only holdout questions")
         for backend, backend_payload in runs.items():
             for trial in holdout_brief["questions"]:
-                run = _trial_run(backend_payload, trial)
+                run = _trial_run(
+                    backend_payload,
+                    trial,
+                    backend=backend,
+                    locked_settings=locked_backends[backend],
+                )
                 comparison = search_lab.compare_trial(trial, run, args.corpus_root)
                 comparison["backend"] = backend
                 comparisons.append(comparison)

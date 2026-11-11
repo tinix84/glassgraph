@@ -48,6 +48,11 @@ def request_hash(request: dict) -> str:
     return _canonical_hash("glassgraph:query-request:v1", request)
 
 
+def backend_snapshot_hash(settings: dict) -> str:
+    """Identify one exact retrieval backend configuration."""
+    return _canonical_hash("glassgraph:backend-snapshot:v1", settings)
+
+
 def _candidate(hit: dict, rank: int) -> dict:
     trace = {
         "path": hit.get("path"),
@@ -114,6 +119,13 @@ def execute_search(
         raise QueryContractError("A search request needs text")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise QueryContractError("A search request needs a positive limit")
+    if request.get("filters") != {
+        "page_types": [],
+        "paths": [],
+        "tags_any": [],
+        "updated_from": None,
+    }:
+        raise QueryContractError("Search filters are not supported by this adapter")
 
     run = adapter.query(text, limit=limit)
     if (
@@ -135,13 +147,15 @@ def execute_search(
                 "name": backend,
                 "version": getattr(adapter, "version", None),
             },
-            "backend_snapshot_hash": _canonical_hash(
-                "glassgraph:backend-snapshot:v1", settings
-            ),
+            "backend_snapshot_hash": backend_snapshot_hash(settings),
             "fallback": {"active": False, "reason": None},
         },
         "index": {
-            "state": "fresh",
+            "state": (
+                "fresh"
+                if isinstance(settings.get("corpus_snapshot_hash"), str)
+                else "unbound"
+            ),
             "corpus_snapshot_hash": settings.get("corpus_snapshot_hash"),
             "stale_reasons": [],
         },
@@ -176,6 +190,9 @@ def backend_run(request: dict, response: dict) -> dict:
         or response.get("schema_version") != RESULT_SCHEMA_VERSION
         or response.get("operation") != "search"
         or response.get("request_hash") != request_hash(request)
+        or response.get("status") not in {"ok", "abstained"}
+        or not isinstance(response.get("index"), dict)
+        or response["index"].get("state") != "fresh"
         or not isinstance(response.get("results"), list)
         or not isinstance(response.get("raw_results"), list)
     ):

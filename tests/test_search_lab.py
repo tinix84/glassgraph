@@ -558,6 +558,7 @@ def test_query_contract_preserves_raw_low_confidence_trace(search_lab_mod):
     exchange = runs["grooveseek"]["trials"]["development-1"]
     response = exchange["response"]
     assert response["status"] == "abstained"
+    assert response["index"]["state"] == "unbound"
     assert response["results"] == []
     assert response["raw_results"][0]["score"]["backend"]["raw"] == 0.2
     assert response["raw_results"][0]["backend_trace"]["locator"] == hit[
@@ -567,6 +568,144 @@ def test_query_contract_preserves_raw_low_confidence_trace(search_lab_mod):
     changed_request = dict(exchange["request"], limit=10)
     with pytest.raises(ValueError, match="stored query exchange"):
         search_lab_mod.query_contract.backend_run(changed_request, response)
+
+
+def test_query_contract_rejects_filters_the_adapter_cannot_enforce(search_lab_mod):
+    class Adapter:
+        def query(self, query, *, limit):
+            raise AssertionError("The adapter must not run")
+
+    request = search_lab_mod.query_contract.search_request("Why?", limit=5)
+    request["filters"]["paths"] = ["allowed/**"]
+
+    with pytest.raises(ValueError, match="filters are not supported"):
+        search_lab_mod.query_contract.execute_search(
+            "grooveseek", Adapter(), request, settings={"limit": 5}
+        )
+
+
+def test_stored_query_exchange_must_match_locked_backend_and_corpus(
+    search_lab_mod, search_lab_cli_mod
+):
+    settings = {
+        "limit": 5,
+        "corpus_snapshot_hash": "sha256:corpus",
+    }
+    request = search_lab_mod.query_contract.search_request("Why?", limit=5)
+
+    class Adapter:
+        def query(self, query, *, limit):
+            return {"hits": [], "raw_hits": [], "abstained": False}
+
+    response = search_lab_mod.query_contract.execute_search(
+        "grooveseek", Adapter(), request, settings=settings
+    )
+    payload = {
+        "trials": {
+            "holdout-1": {
+                "role": "holdout",
+                "request": request,
+                "response": response,
+            }
+        }
+    }
+    trial = {"id": "holdout-1", "role": "holdout", "query": "Why?"}
+
+    run = search_lab_cli_mod._trial_run(
+        payload,
+        trial,
+        backend="grooveseek",
+        locked_settings=settings,
+    )
+    assert run["hits"] == []
+
+    response["execution"]["adapter"]["name"] = "qmd"
+    with pytest.raises(ValueError, match="locked backend"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+    response["execution"]["adapter"]["name"] = "grooveseek"
+    response["index"]["corpus_snapshot_hash"] = "sha256:other"
+    with pytest.raises(ValueError, match="locked backend"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+    response["index"]["corpus_snapshot_hash"] = "sha256:corpus"
+    response["execution"]["backend_snapshot_hash"] = "sha256:other"
+    with pytest.raises(ValueError, match="locked backend"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+    response["execution"]["backend_snapshot_hash"] = (
+        search_lab_mod.query_contract.backend_snapshot_hash(settings)
+    )
+    request["limit"] = 2
+    with pytest.raises(ValueError, match="locked backend"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+
+def test_stored_query_exchange_rejects_error_and_legacy_results(
+    search_lab_mod, search_lab_cli_mod
+):
+    settings = {"limit": 5, "corpus_snapshot_hash": "sha256:corpus"}
+    request = search_lab_mod.query_contract.search_request("Why?", limit=5)
+
+    class Adapter:
+        def query(self, query, *, limit):
+            return {"hits": [], "raw_hits": [], "abstained": False}
+
+    response = search_lab_mod.query_contract.execute_search(
+        "grooveseek", Adapter(), request, settings=settings
+    )
+    response["status"] = "error"
+    trial = {"id": "holdout-1", "role": "holdout", "query": "Why?"}
+    payload = {
+        "trials": {
+            "holdout-1": {
+                "role": "holdout",
+                "request": request,
+                "response": response,
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="stored query exchange"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
+
+    payload["trials"]["holdout-1"] = {
+        "role": "holdout",
+        "query": "Why?",
+        "run": {"hits": [], "raw_hits": []},
+    }
+    with pytest.raises(ValueError, match="versioned query exchange"):
+        search_lab_cli_mod._trial_run(
+            payload,
+            trial,
+            backend="grooveseek",
+            locked_settings=settings,
+        )
 
 
 def test_holdout_adapter_execution_refuses_to_run_before_settings_lock(search_lab_mod):
@@ -682,23 +821,35 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     brief_path.write_text(json.dumps(brief), encoding="utf-8")
     holdout_brief_path.write_text(json.dumps(holdout_brief), encoding="utf-8")
     corpus_hash = search_lab_cli_mod.retrieval_benchmark.corpus_snapshot_hash(corpus)
-    backend_runs = {
-        "settings": {"limit": 5, "corpus_snapshot_hash": corpus_hash},
-        "trials": {
-            "development-1": {
-                "query": "What evidence exists?",
-                "role": "development",
-                "run": run,
-            },
-            "holdout-1": {
-                "query": "Which local source supports it?",
-                "role": "holdout",
-                "run": run,
-            },
-        },
-    }
+    settings = {"limit": 5, "corpus_snapshot_hash": corpus_hash}
+
+    class Adapter:
+        def query(self, query, *, limit):
+            return run
+
+    def backend_runs(backend):
+        trials = {}
+        for trial in brief["questions"] + holdout_brief["questions"]:
+            request = search_lab_cli_mod.query_contract.search_request(
+                trial["query"], limit=5
+            )
+            trials[trial["id"]] = {
+                "role": trial["role"],
+                "request": request,
+                "response": search_lab_cli_mod.query_contract.execute_search(
+                    backend, Adapter(), request, settings=settings
+                ),
+            }
+        return {"settings": settings, "trials": trials}
+
     runs_path.write_text(
-        json.dumps({"grooveseek": backend_runs, "qmd": backend_runs}), encoding="utf-8"
+        json.dumps(
+            {
+                "grooveseek": backend_runs("grooveseek"),
+                "qmd": backend_runs("qmd"),
+            }
+        ),
+        encoding="utf-8",
     )
     tuning_path.write_text(
         json.dumps(
