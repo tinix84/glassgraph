@@ -218,7 +218,7 @@ def test_qmd_settings_identity_changes_when_query_model_bytes_change(
         limit=10,
         path_prefix=None,
         tokenizer=tokenizer,
-        node_executable=str(tokenizer),
+        node_executable=shutil.which("node"),
         qmd_script=str(_write_json_qmd_package(tmp_path)),
         index="fixture",
         collection="fixture",
@@ -319,12 +319,18 @@ def test_qmd_config_must_use_pinned_model_artifact(
     )
 
     config.write_text("collections: {}\n", encoding="utf-8")
-    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(
+        args,
+        retrieval_benchmark_cli_mod._read_qmd_config(args),
+    )
 
     config.write_text(
         "models:\n  embed: hf:remote/model/file.gguf\n", encoding="utf-8"
     )
-    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+    assert not retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(
+        args,
+        retrieval_benchmark_cli_mod._read_qmd_config(args),
+    )
 
     config.write_text(
         f"models:\n  embed: {json.dumps(configured_model)}\n"
@@ -332,7 +338,10 @@ def test_qmd_config_must_use_pinned_model_artifact(
         "  rerank: local-rerank.gguf\n",
         encoding="utf-8",
     )
-    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(args)
+    assert retrieval_benchmark_cli_mod._qmd_config_uses_model_artifact(
+        args,
+        retrieval_benchmark_cli_mod._read_qmd_config(args),
+    )
 
 
 def test_qmd_config_parses_yaml_date_like_scalar_as_text(
@@ -395,8 +404,19 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
 def test_qmd_config_hash_uses_installed_qmd_yaml_parser(
     tmp_path, monkeypatch, retrieval_benchmark_cli_mod
 ):
+    models = {
+        name: tmp_path / f"{name}.gguf"
+        for name in ("embed", "generate", "rerank")
+    }
+    for name, path in models.items():
+        path.write_text(f"{name} model", encoding="utf-8")
     config = tmp_path / "fixture.yml"
     config.write_text(
+        "model_defaults: &local_models\n"
+        f"  embed: {json.dumps(str(models['embed']))}\n"
+        f"  generate: {json.dumps(str(models['generate']))}\n"
+        f"  rerank: {json.dumps(str(models['rerank']))}\n"
+        "models: {<<: *local_models}\n"
         "values:\n"
         "  defaults: &defaults {answer: 42}\n"
         "  merged: {<<: *defaults}\n"
@@ -421,11 +441,28 @@ def test_qmd_config_hash_uses_installed_qmd_yaml_parser(
 
     payload = retrieval_benchmark_cli_mod._read_qmd_config(args)
 
-    expected = (
-        '{"values":{"defaults":{"answer":42},"merged":{"<<":{"answer":42}},'
-        '"leading_zero_decimal":123,"exponent":1000,"infinity":null,'
-        '"binary_text":"0b10","hex_number":255,"octal_number":63,'
-        '"hex_text":"+0xFF","underscore_text":"1_000"}}'
+    expected_payload = {
+        "model_defaults": {name: str(path) for name, path in models.items()},
+        "models": {
+            "<<": {name: str(path) for name, path in models.items()}
+        },
+        "values": {
+            "defaults": {"answer": 42},
+            "merged": {"<<": {"answer": 42}},
+            "leading_zero_decimal": 123,
+            "exponent": 1000,
+            "infinity": None,
+            "binary_text": "0b10",
+            "hex_number": 255,
+            "octal_number": 63,
+            "hex_text": "+0xFF",
+            "underscore_text": "1_000",
+        },
+    }
+    expected = json.dumps(
+        expected_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
 
     def run(command, *, input, **_kwargs):
@@ -437,6 +474,12 @@ def test_qmd_config_hash_uses_installed_qmd_yaml_parser(
 
     assert retrieval_benchmark_cli_mod._qmd_config_json(args, payload) == (
         expected
+    )
+    assert retrieval_benchmark_cli_mod._qmd_config_uses_local_models(payload)
+    exact_payload = retrieval_benchmark_cli_mod._read_qmd_config_exact(args)
+    assert exact_payload == expected_payload
+    assert not retrieval_benchmark_cli_mod._qmd_config_uses_local_models(
+        exact_payload
     )
 
 

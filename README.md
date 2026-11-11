@@ -98,7 +98,7 @@ The runner compares the GrooveSeek document roster and content hashes with the f
 
 QMD runs require `--qmd-config <index-name>.yml`, `--qmd-index-db <index.sqlite>`, and `--qmd-build-receipt <receipt.json>`. The configuration must define `models.embed`, `models.generate`, and `models.rerank`.
 
-The embed value and `--retrieval-model-id` must use the same literal absolute model-file value that QMD stored. The runner independently resolves that value to the pinned artifact. It uses QMD's installed YAML parser to verify the stored configuration hash. It also verifies the QMD 2.8.3 embedding fingerprint before retrieval.
+The embed value and `--retrieval-model-id` must use the same literal absolute model-file value that QMD stored. The runner independently resolves that value to the pinned artifact. It uses QMD's installed YAML parser for the configuration hash, model checks, and model hashes. It also verifies the QMD 2.8.3 embedding fingerprint before retrieval.
 
 Build QMD through `qmd_benchmark_build.py`. This command runs `qmd update` and forced `qmd embed -f` with the pinned literal model ID. It writes the receipt only after the completed index passes the frozen-corpus, chunk, vector, model, and formatter checks. The build proof compares each active chunk's embedding state before and after the forced embed. The write-once receipt binds the QMD package, all three model files, model ID, configuration, corpus documents, and SQLite snapshot. Replacing a GGUF file at the same path therefore invalidates the index.
 

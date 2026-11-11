@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from pathlib import Path
 
 import retrieval_backends
@@ -62,12 +63,12 @@ def main(argv=None, *, process_runner=None) -> int:
     if not args.retrieval_model_artifact.is_file():
         parser.error("The pinned QMD embedding model is unavailable")
     try:
-        config_payload = retrieval_benchmark_cli._read_qmd_config(args)
+        config_payload = retrieval_benchmark_cli._read_qmd_config_exact(args)
         model_is_pinned = retrieval_benchmark_cli._qmd_config_uses_model_artifact(
             args,
             config_payload,
         )
-    except (OSError, TypeError, ValueError):
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
         parser.error("The QMD build configuration is invalid")
     if not model_is_pinned:
         parser.error("The QMD build configuration does not use the pinned model")
@@ -81,7 +82,7 @@ def main(argv=None, *, process_runner=None) -> int:
         before_embedding_state = (
             retrieval_benchmark_cli._qmd_active_embedding_state(args)
         )
-    except (OSError, TypeError, ValueError):
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
         parser.error("QMD build inputs could not be fingerprinted")
 
     runner = process_runner or retrieval_backends.run_process
@@ -143,7 +144,7 @@ def main(argv=None, *, process_runner=None) -> int:
             build_proof,
             payload=after,
         )
-    except (OSError, TypeError, ValueError):
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
         parser.error("The QMD build receipt could not be written")
     return 0
 

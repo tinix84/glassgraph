@@ -250,8 +250,16 @@ def _backend_settings_payload(args) -> dict:
     qmd_index_db = getattr(args, "qmd_index_db", None)
     qmd_build_receipt = getattr(args, "qmd_build_receipt", None)
     try:
-        qmd_model_hashes = _qmd_model_artifact_hashes(_read_qmd_config(args))
-    except (AttributeError, OSError, TypeError, ValueError):
+        qmd_model_hashes = _qmd_model_artifact_hashes(
+            _read_qmd_config_exact(args)
+        )
+    except (
+        AttributeError,
+        OSError,
+        subprocess.SubprocessError,
+        TypeError,
+        ValueError,
+    ):
         qmd_model_hashes = {
             f"qmd_model_{name}": None
             for name in ("embed", "generate", "rerank")
@@ -320,6 +328,16 @@ def _qmd_config_json(args, _payload: dict) -> str:
     return completed.stdout.decode("utf-8")
 
 
+def _read_qmd_config_exact(args) -> dict:
+    try:
+        payload = json.loads(_qmd_config_json(args, {}))
+    except json.JSONDecodeError as error:
+        raise ValueError("QMD configuration is invalid") from error
+    if not isinstance(payload, dict):
+        raise ValueError("QMD configuration must be a mapping")
+    return payload
+
+
 def _qmd_config_has_update_hooks(payload: dict) -> bool:
     collections = payload.get("collections")
     return isinstance(collections, dict) and any(
@@ -353,11 +371,9 @@ def _qmd_model_artifact_hashes(payload: dict) -> dict[str, str | None]:
     }
 
 
-def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
+def _qmd_config_uses_model_artifact(args, payload: dict) -> bool:
     if args.qmd_config.name != f"{args.index}.yml":
         return False
-    if payload is None:
-        payload = _read_qmd_config(args)
     models = payload.get("models")
     if not isinstance(models, dict):
         return False
@@ -435,7 +451,7 @@ def _backend_source_matches_benchmark(args, backend_root: Path) -> bool:
 
 
 def _qmd_build_receipt_payload(args) -> dict:
-    config_payload = _read_qmd_config(args)
+    config_payload = _read_qmd_config_exact(args)
     return {
         "schema_version": "glassgraph.qmd-build-receipt.v1",
         "qmd_package_sha256": _qmd_package_sha256(args.qmd_script),
@@ -556,6 +572,7 @@ def _qmd_build_receipt_is_valid(args) -> bool:
         json.JSONDecodeError,
         OSError,
         sqlite3.Error,
+        subprocess.SubprocessError,
         TypeError,
         UnicodeError,
         ValueError,
@@ -1206,12 +1223,18 @@ def main(argv=None, *, process_runner=None, token_counter=None) -> int:
         )
     if args.backend == "qmd":
         try:
-            qmd_config_payload = _read_qmd_config(args)
+            qmd_config_payload = _read_qmd_config_exact(args)
             model_is_pinned = _qmd_config_uses_model_artifact(
                 args,
                 qmd_config_payload,
             )
-        except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            UnicodeError,
+            ValueError,
+            yaml.YAMLError,
+        ):
             parser.error("The QMD benchmark configuration is invalid")
         if not model_is_pinned:
             parser.error(
