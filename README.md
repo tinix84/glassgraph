@@ -66,7 +66,7 @@ python search_lab_cli.py `
   --offline-verified
 ```
 
-All four private JSON inputs and the report must stay in `.glassgraph/benchmarks/private/v1/`. The report preserves private query-level material. Do not publish it. Publish only aggregate measurements and decisions.
+All five private JSON inputs and the report must stay in `.glassgraph/benchmarks/private/v1/`. The report preserves private query-level material. Do not publish it. Publish only aggregate measurements and decisions.
 
 Run the public fixture with GrooveSeek:
 

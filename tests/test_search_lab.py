@@ -542,7 +542,18 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     holdout_brief_path.write_text(json.dumps(holdout_brief), encoding="utf-8")
     backend_runs = {
         "settings": {"limit": 5},
-        "trials": {"development-1": run, "holdout-1": run},
+        "trials": {
+            "development-1": {
+                "query": "What evidence exists?",
+                "role": "development",
+                "run": run,
+            },
+            "holdout-1": {
+                "query": "Which local source supports it?",
+                "role": "holdout",
+                "run": run,
+            },
+        },
     }
     runs_path.write_text(
         json.dumps({"grooveseek": backend_runs, "qmd": backend_runs}), encoding="utf-8"

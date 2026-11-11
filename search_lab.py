@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import retrieval_benchmark
 
@@ -86,10 +87,17 @@ def record_holdout(session: dict, run: dict) -> dict:
 
 
 def _citation_is_in_hit(citation: dict, hit: dict) -> bool:
-    return (
-        hit.get("path") == citation["path"]
-        and citation["text"] in str(hit.get("text") or "")
-    )
+    hit_text = str(hit.get("text") or "")
+    if hit.get("path") != citation["path"] or citation["text"] not in hit_text:
+        return False
+    if isinstance(hit.get("heading"), str):
+        return hit["heading"] == citation.get("heading")
+    locator = hit.get("backend_locator")
+    if isinstance(locator, dict) and locator.get("kind") == "heuristic_line":
+        passage_offset = hit_text.index(citation["text"])
+        passage_line = locator.get("line", 0) + hit_text.count("\n", 0, passage_offset)
+        return citation["line_start"] <= passage_line <= citation["line_end"]
+    return citation.get("document_occurrences") == 1
 
 
 def _citation_document_is_in_hit(citation: dict, hit: dict) -> bool:
@@ -138,6 +146,9 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
         normalized = deepcopy(citation)
         normalized["evidence_id"] = matching[0]["evidence_id"]
         normalized["heading_path"] = matching[0]["heading_path"]
+        normalized["line_start"] = matching[0]["line_start"]
+        normalized["line_end"] = matching[0]["line_end"]
+        normalized["document_occurrences"] = len(derived)
         citations.append(normalized)
 
     accepted_hits = deepcopy(backend_run.get("hits") or [])
@@ -228,11 +239,12 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
         "abstained": backend_run.get("abstained") is True,
         "abstention_disagreement": (
             scoring_eligible
+            and not no_answer
             and backend_run.get("abstained") is True
-            and coverage(accepted_missing) < coverage(raw_missing)
+            and coverage(accepted_missing) < 1.0
         ),
         "unsupported_answer_disagreement": (
-            no_answer_verified and bool(accepted_hits)
+            no_answer and no_answer_verified and bool(accepted_hits)
         ),
         "latency_ms": backend_run.get("latency_ms"),
         "peak_working_set_bytes": backend_run.get("peak_working_set_bytes"),
@@ -254,14 +266,46 @@ def run_trials(session: dict, brief: dict, adapters: dict, *, limit: int) -> dic
         locked_backends = session["settings_lock"].get("backends")
         if not isinstance(locked_backends, dict) or any(
             backend not in locked_backends
-            or locked_backends[backend].get("limit") != limit
-            for backend in adapters
+            or locked_backends[backend] != _adapter_settings(adapter, limit)
+            for backend, adapter in adapters.items()
         ):
             raise SearchLabError("Holdout execution does not match the locked settings")
     runs = {}
     for backend, adapter in adapters.items():
         backend_runs = {}
         for trial in brief.get("questions", []):
-            backend_runs[trial["id"]] = adapter.query(trial["query"], limit=limit)
-        runs[backend] = {"settings": {"limit": limit}, "trials": backend_runs}
+            backend_runs[trial["id"]] = {
+                "query": trial["query"],
+                "role": trial["role"],
+                "run": adapter.query(trial["query"], limit=limit),
+            }
+        runs[backend] = {
+            "settings": _adapter_settings(adapter, limit),
+            "trials": backend_runs,
+        }
     return runs
+
+
+def _adapter_settings(adapter, limit: int) -> dict:
+    settings = {"limit": limit}
+    for name in (
+        "config",
+        "model",
+        "low_confidence_policy",
+        "path_prefix",
+        "index",
+        "collection",
+        "embed_model",
+    ):
+        value = getattr(adapter, name, None)
+        if value is not None:
+            settings[name] = value
+    corpus_root = getattr(adapter, "corpus_root", None)
+    if corpus_root is None:
+        knowledge_base = getattr(adapter, "knowledge_base", None)
+        corpus_root = knowledge_base if knowledge_base and Path(knowledge_base).is_dir() else None
+    if corpus_root is not None:
+        settings["corpus_snapshot_hash"] = retrieval_benchmark.corpus_snapshot_hash(
+            corpus_root
+        )
+    return settings

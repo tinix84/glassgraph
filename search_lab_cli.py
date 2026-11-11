@@ -63,6 +63,18 @@ def _paths_are_private(args) -> bool:
         return False
 
 
+def _trial_run(backend_payload: dict, trial: dict) -> dict:
+    entry = backend_payload["trials"].get(trial["id"])
+    if (
+        not isinstance(entry, dict)
+        or entry.get("query") != trial.get("query")
+        or entry.get("role") != trial.get("role")
+        or not isinstance(entry.get("run"), dict)
+    ):
+        raise ValueError(f"A matching backend run is missing for {trial['id']}")
+    return entry["run"]
+
+
 def main(argv=None) -> int:
     """Write one private Sol-versus-Glassgraph comparison report."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -107,9 +119,7 @@ def main(argv=None) -> int:
             ):
                 raise ValueError(f"Backend runs do not match the lock for {backend}")
             for trial in brief["questions"]:
-                run = backend_payload["trials"].get(trial["id"])
-                if not isinstance(run, dict):
-                    raise ValueError(f"A backend run is missing for {trial['id']}")
+                run = _trial_run(backend_payload, trial)
                 comparison = search_lab.compare_trial(trial, run, args.corpus_root)
                 comparison["backend"] = backend
                 comparisons.append(comparison)
@@ -123,9 +133,7 @@ def main(argv=None) -> int:
                 raise ValueError("The holdout brief can contain only holdout questions")
         for backend, backend_payload in runs.items():
             for trial in holdout_brief["questions"]:
-                run = backend_payload["trials"].get(trial["id"])
-                if not isinstance(run, dict):
-                    raise ValueError(f"A backend run is missing for {trial['id']}")
+                run = _trial_run(backend_payload, trial)
                 comparison = search_lab.compare_trial(trial, run, args.corpus_root)
                 comparison["backend"] = backend
                 comparisons.append(comparison)

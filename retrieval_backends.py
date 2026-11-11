@@ -190,6 +190,11 @@ class GrooveSeekAdapter:
                         "kind": "utf8_match_spans",
                         "value": hit.get("match_spans", []),
                     },
+                    **(
+                        {"heading": hit["heading"]}
+                        if isinstance(hit.get("heading"), str)
+                        else {}
+                    ),
                 }
             )
 
