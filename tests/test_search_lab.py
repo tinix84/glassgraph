@@ -128,6 +128,20 @@ def test_development_session_does_not_require_or_expose_a_holdout_brief(
     assert session["holdout_runs"][0]["brief"]["topic"] == "Untouched topic"
 
 
+def test_research_brief_accepts_a_topic_without_an_argument(search_lab_mod):
+    session = search_lab_mod.new_session(
+        {
+            "topic": "SiC traction inverters",
+            "questions": [
+                {"id": "development-1", "role": "development", "query": "Why?"}
+            ],
+            "constraints": {"offline": True, "private": True},
+        }
+    )
+
+    assert session["brief"]["topic"] == "SiC traction inverters"
+
+
 def test_comparison_exposes_useful_raw_evidence_hidden_by_abstention(
     tmp_path, search_lab_mod
 ):
@@ -196,6 +210,46 @@ def test_unverified_no_answer_trial_remains_unscored(tmp_path, search_lab_mod):
         "reason": "no-answer claim lacks owner acceptance or an exhaustive search",
     }
     assert comparison["citation_coverage"] == {"accepted": None, "raw": None}
+
+
+def test_verified_no_answer_trial_flags_returned_hits_as_unsupported(
+    tmp_path, search_lab_mod
+):
+    trial = {
+        "id": "development-negative-verified",
+        "role": "development",
+        "kind": "no_answer",
+        "query": "Which source proves an unsupported claim?",
+        "reference_citations": [],
+        "owner_accepted": True,
+    }
+    hit = {"path": "noise.md", "text": "Unrelated result."}
+
+    comparison = search_lab_mod.compare_trial(
+        trial,
+        {"hits": [hit], "raw_hits": [hit], "abstained": False},
+        tmp_path,
+    )
+
+    assert comparison["unsupported_answer_disagreement"] is True
+
+
+def test_answerable_trial_requires_at_least_one_reference_citation(
+    tmp_path, search_lab_mod
+):
+    trial = {
+        "id": "development-empty-positive",
+        "role": "development",
+        "query": "What supports this claim?",
+        "reference_citations": [],
+    }
+
+    with pytest.raises(search_lab_mod.SearchLabError, match="reference citation"):
+        search_lab_mod.compare_trial(
+            trial,
+            {"hits": [], "raw_hits": [], "abstained": True},
+            tmp_path,
+        )
 
 
 def test_comparison_reports_noise_rank_and_context_disagreements(
@@ -282,6 +336,55 @@ def test_document_coverage_does_not_require_the_exact_passage_chunk(
     assert comparison["noisy_hit_ranks"] == {"accepted": [], "raw": []}
 
 
+def test_document_coverage_counts_unique_cited_documents(tmp_path, search_lab_mod):
+    (tmp_path / "a.md").write_text("# A\n\nFirst.\n\nSecond.\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# B\n\nThird.\n", encoding="utf-8")
+    trial = {
+        "id": "development-documents",
+        "role": "development",
+        "query": "Find documents.",
+        "reference_citations": [
+            {"path": "a.md", "heading": "A", "text": "First.", "grade": "direct"},
+            {"path": "a.md", "heading": "A", "text": "Second.", "grade": "direct"},
+            {"path": "b.md", "heading": "B", "text": "Third.", "grade": "direct"},
+        ],
+    }
+    hit = {"path": "a.md", "text": "First. Second."}
+
+    comparison = search_lab_mod.compare_trial(
+        trial, {"hits": [hit], "raw_hits": [hit], "abstained": False}, tmp_path
+    )
+
+    assert comparison["document_coverage"] == {"accepted": 0.5, "raw": 0.5}
+
+
+def test_reference_citation_must_match_its_declared_heading(tmp_path, search_lab_mod):
+    (tmp_path / "evidence.md").write_text(
+        "# Actual\n\nExact passage.\n",
+        encoding="utf-8",
+    )
+    trial = {
+        "id": "development-heading",
+        "role": "development",
+        "query": "Find it.",
+        "reference_citations": [
+            {
+                "path": "evidence.md",
+                "heading": "Missing",
+                "text": "Exact passage.",
+                "grade": "direct",
+            }
+        ],
+    }
+
+    with pytest.raises(search_lab_mod.SearchLabError, match="resolve exactly once"):
+        search_lab_mod.compare_trial(
+            trial,
+            {"hits": [], "raw_hits": [], "abstained": True},
+            tmp_path,
+        )
+
+
 def test_same_trials_run_through_each_retrieval_adapter(search_lab_mod):
     calls = []
 
@@ -318,7 +421,11 @@ def test_same_trials_run_through_each_retrieval_adapter(search_lab_mod):
         ("qmd", "Second question?", 5),
     ]
     assert set(runs) == {"grooveseek", "qmd"}
-    assert set(runs["grooveseek"]) == {"development-1", "development-2"}
+    assert runs["grooveseek"]["settings"] == {"limit": 5}
+    assert set(runs["grooveseek"]["trials"]) == {
+        "development-1",
+        "development-2",
+    }
 
 
 def test_holdout_adapter_execution_refuses_to_run_before_settings_lock(search_lab_mod):
@@ -342,6 +449,33 @@ def test_holdout_adapter_execution_refuses_to_run_before_settings_lock(search_la
             holdout,
             {"grooveseek": object()},
             limit=5,
+        )
+
+
+def test_holdout_adapter_execution_must_match_locked_backend_and_limit(search_lab_mod):
+    development = {
+        "topic": "Development",
+        "questions": [
+            {"id": "development-1", "role": "development", "query": "Why?"}
+        ],
+        "constraints": {"offline": True, "private": True},
+    }
+    session = search_lab_mod.new_session(development)
+    search_lab_mod.lock_settings(
+        session, {"backends": {"grooveseek": {"limit": 5}}}
+    )
+    holdout = {
+        "questions": [
+            {"id": "holdout-1", "role": "holdout", "query": "Untouched?"}
+        ]
+    }
+
+    with pytest.raises(search_lab_mod.SearchLabError, match="locked settings"):
+        search_lab_mod.run_trials(
+            session,
+            holdout,
+            {"grooveseek": object()},
+            limit=10,
         )
 
 
@@ -401,15 +535,44 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     brief_path = workspace / "brief.json"
     holdout_brief_path = workspace / "holdout-brief.json"
     runs_path = workspace / "runs.json"
+    tuning_path = workspace / "tuning.json"
     lock_path = workspace / "settings-lock.json"
     output_path = workspace / "report.json"
     brief_path.write_text(json.dumps(brief), encoding="utf-8")
     holdout_brief_path.write_text(json.dumps(holdout_brief), encoding="utf-8")
+    backend_runs = {
+        "settings": {"limit": 5},
+        "trials": {"development-1": run, "holdout-1": run},
+    }
     runs_path.write_text(
-        json.dumps({"development-1": run, "holdout-1": run}), encoding="utf-8"
+        json.dumps({"grooveseek": backend_runs, "qmd": backend_runs}), encoding="utf-8"
+    )
+    tuning_path.write_text(
+        json.dumps(
+            {
+                "iterations": [
+                    {
+                        "question_id": "development-1",
+                        "prior_settings": {"limit": 4},
+                        "change": {"field": "limit", "before": 4, "after": 5},
+                        "rationale": "Improve document coverage.",
+                        "aggregate_delta": {"document_coverage": 0.1},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
     )
     lock_path.write_text(
-        json.dumps({"backend": "grooveseek", "limit": 5}), encoding="utf-8"
+        json.dumps(
+            {
+                "backends": {"grooveseek": {"limit": 5}, "qmd": {"limit": 5}},
+                "corpus_snapshot_hash": (
+                    search_lab_cli_mod.retrieval_benchmark.corpus_snapshot_hash(corpus)
+                ),
+            }
+        ),
+        encoding="utf-8",
     )
 
     result = search_lab_cli_mod.main(
@@ -420,6 +583,8 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
             str(holdout_brief_path),
             "--runs",
             str(runs_path),
+            "--tuning",
+            str(tuning_path),
             "--corpus-root",
             str(corpus),
             "--settings-lock",
@@ -435,8 +600,11 @@ def test_private_cli_writes_locked_offline_search_report(tmp_path, search_lab_cl
     assert report["privacy"] == "private"
     assert report["offline_verified"] is True
     assert report["session"]["state"] == "holdout"
-    assert report["session"]["settings_lock"]["backend"] == "grooveseek"
-    assert [item["role"] for item in report["comparisons"]] == [
-        "development",
-        "holdout",
-    ]
+    assert report["session"]["settings_lock"]["backends"]["grooveseek"]["limit"] == 5
+    assert len(report["session"]["development_iterations"]) == 1
+    assert {(item["backend"], item["role"]) for item in report["comparisons"]} == {
+        ("grooveseek", "development"),
+        ("grooveseek", "holdout"),
+        ("qmd", "development"),
+        ("qmd", "holdout"),
+    }

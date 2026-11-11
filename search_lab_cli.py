@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import retrieval_benchmark_cli
+import retrieval_benchmark
 import search_lab
 
 
@@ -36,6 +37,7 @@ def _paths_are_private(args) -> bool:
             args.brief.resolve(),
             args.holdout_brief.resolve(),
             args.runs.resolve(),
+            args.tuning.resolve(),
             args.settings_lock.resolve(),
             args.output.resolve(),
         ]
@@ -44,7 +46,12 @@ def _paths_are_private(args) -> bool:
         args.corpus_root.resolve().relative_to(vault_root)
         if any(
             retrieval_benchmark_cli._path_chain_has_nested_git(path, vault_root)
-            for path in (workspace, args.output.resolve().parent, args.corpus_root.resolve())
+            for path in (
+                workspace,
+                args.output.resolve().parent,
+                args.corpus_root.resolve(),
+                *paths,
+            )
         ):
             return False
         return retrieval_benchmark_cli._private_git_paths_are_unpublished(
@@ -62,6 +69,7 @@ def main(argv=None) -> int:
     parser.add_argument("--brief", type=Path, required=True)
     parser.add_argument("--holdout-brief", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
+    parser.add_argument("--tuning", type=Path, required=True)
     parser.add_argument("--corpus-root", type=Path, required=True)
     parser.add_argument("--settings-lock", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -76,18 +84,35 @@ def main(argv=None) -> int:
     try:
         brief = _load_object(args.brief, "research brief")
         runs = _load_object(args.runs, "backend runs")
+        tuning = _load_object(args.tuning, "tuning history")
         settings_lock = _load_object(args.settings_lock, "settings lock")
+        if settings_lock.get("corpus_snapshot_hash") != (
+            retrieval_benchmark.corpus_snapshot_hash(args.corpus_root)
+        ):
+            raise ValueError("The corpus does not match the settings lock")
         session = search_lab.new_session(brief)
         comparisons = []
 
-        for trial in brief["questions"]:
-            if trial["role"] != "development":
-                continue
-            run = runs.get(trial["id"])
-            if not isinstance(run, dict):
-                raise ValueError(f"A backend run is missing for {trial['id']}")
-            comparison = search_lab.compare_trial(trial, run, args.corpus_root)
-            comparisons.append(comparison)
+        for iteration in tuning.get("iterations", []):
+            search_lab.record_iteration(session, iteration)
+
+        locked_backends = settings_lock.get("backends")
+        if not isinstance(locked_backends, dict) or set(runs) != set(locked_backends):
+            raise ValueError("Backend runs do not match the settings lock")
+        for backend, backend_payload in runs.items():
+            if (
+                not isinstance(backend_payload, dict)
+                or backend_payload.get("settings") != locked_backends[backend]
+                or not isinstance(backend_payload.get("trials"), dict)
+            ):
+                raise ValueError(f"Backend runs do not match the lock for {backend}")
+            for trial in brief["questions"]:
+                run = backend_payload["trials"].get(trial["id"])
+                if not isinstance(run, dict):
+                    raise ValueError(f"A backend run is missing for {trial['id']}")
+                comparison = search_lab.compare_trial(trial, run, args.corpus_root)
+                comparison["backend"] = backend
+                comparisons.append(comparison)
 
         search_lab.lock_settings(session, settings_lock)
 
@@ -96,12 +121,15 @@ def main(argv=None) -> int:
         for trial in holdout_brief["questions"]:
             if trial.get("role") != "holdout":
                 raise ValueError("The holdout brief can contain only holdout questions")
-            run = runs.get(trial["id"])
-            if not isinstance(run, dict):
-                raise ValueError(f"A backend run is missing for {trial['id']}")
-            comparison = search_lab.compare_trial(trial, run, args.corpus_root)
-            comparisons.append(comparison)
-            holdout_comparisons.append(comparison)
+        for backend, backend_payload in runs.items():
+            for trial in holdout_brief["questions"]:
+                run = backend_payload["trials"].get(trial["id"])
+                if not isinstance(run, dict):
+                    raise ValueError(f"A backend run is missing for {trial['id']}")
+                comparison = search_lab.compare_trial(trial, run, args.corpus_root)
+                comparison["backend"] = backend
+                comparisons.append(comparison)
+                holdout_comparisons.append(comparison)
         search_lab.record_holdout(
             session,
             {"brief": holdout_brief, "runs": holdout_comparisons},

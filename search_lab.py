@@ -14,9 +14,11 @@ def new_session(brief: dict) -> dict:
     """Create a development session from a research brief."""
     if not isinstance(brief, dict):
         raise SearchLabError("The research brief must be an object")
-    for field in ("topic", "argument"):
-        if not isinstance(brief.get(field), str) or not brief[field].strip():
-            raise SearchLabError(f"The research brief needs a {field}")
+    if not any(
+        isinstance(brief.get(field), str) and brief[field].strip()
+        for field in ("topic", "argument")
+    ):
+        raise SearchLabError("The research brief needs a topic or an argument")
     questions = brief.get("questions")
     if not isinstance(questions, list) or not questions:
         raise SearchLabError("The research brief needs questions")
@@ -40,7 +42,7 @@ def new_session(brief: dict) -> dict:
 def record_iteration(session: dict, iteration: dict) -> dict:
     """Record one development change before the settings lock."""
     if session.get("settings_lock") is not None:
-        raise SearchLabError("The settings are locked; tuning is not permitted")
+        raise SearchLabError("The settings are locked. Tuning is not permitted")
     change = iteration.get("change") if isinstance(iteration, dict) else None
     if not isinstance(change, dict) or not {
         "field",
@@ -104,6 +106,11 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
         and bool(exhaustive_search.get("method"))
         and bool(exhaustive_search.get("scope"))
     )
+    reference_citations = trial.get("reference_citations")
+    if not no_answer and (
+        not isinstance(reference_citations, list) or not reference_citations
+    ):
+        raise SearchLabError("An answerable trial needs a reference citation")
     scoring_eligible = not no_answer or no_answer_verified
     scoring_reason = (
         "exact reference citations verified"
@@ -115,13 +122,22 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
         )
     )
     citations = []
-    for citation in trial.get("reference_citations", []):
+    for citation in reference_citations or []:
         derived = retrieval_benchmark.derive_evidence_records(corpus_root, citation)
-        if len(derived) != 1:
+        matching = [
+            record
+            for record in derived
+            if record["evidence_id"]
+            == citation.get("evidence_id", record["evidence_id"])
+            and record["heading"] == citation.get("heading", record["heading"])
+            and record["heading_path"]
+            == citation.get("heading_path", record["heading_path"])
+        ]
+        if len(matching) != 1:
             raise SearchLabError("A reference citation must resolve exactly once")
         normalized = deepcopy(citation)
-        normalized["evidence_id"] = derived[0]["evidence_id"]
-        normalized["heading_path"] = derived[0]["heading_path"]
+        normalized["evidence_id"] = matching[0]["evidence_id"]
+        normalized["heading_path"] = matching[0]["heading_path"]
         citations.append(normalized)
 
     accepted_hits = deepcopy(backend_run.get("hits") or [])
@@ -136,19 +152,8 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
 
     accepted_missing = missing(accepted_hits)
     raw_missing = missing(raw_hits)
-    accepted_document_missing = [
-        index
-        for index, citation in enumerate(citations)
-        if not any(
-            _citation_document_is_in_hit(citation, hit) for hit in accepted_hits
-        )
-    ]
-    raw_document_missing = [
-        index
-        for index, citation in enumerate(citations)
-        if not any(_citation_document_is_in_hit(citation, hit) for hit in raw_hits)
-    ]
     total = len(citations)
+    cited_documents = {citation["path"] for citation in citations}
 
     def citation_rank(citation: dict, hit_list: list[dict]) -> int | None:
         for rank, hit in enumerate(hit_list, start=1):
@@ -184,6 +189,12 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
             return None
         return (total - len(missing_citations)) / total if total else 1.0
 
+    def document_coverage(hit_list: list[dict]) -> float | None:
+        if no_answer and not scoring_eligible:
+            return None
+        found = cited_documents.intersection(hit.get("path") for hit in hit_list)
+        return len(found) / len(cited_documents) if cited_documents else 1.0
+
     return {
         "trial_id": trial.get("id"),
         "role": trial.get("role"),
@@ -197,8 +208,8 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
             "raw": coverage(raw_missing),
         },
         "document_coverage": {
-            "accepted": coverage(accepted_document_missing),
-            "raw": coverage(raw_document_missing),
+            "accepted": document_coverage(accepted_hits),
+            "raw": document_coverage(raw_hits),
         },
         "missing_citations": {
             "accepted": accepted_missing,
@@ -220,6 +231,9 @@ def compare_trial(trial: dict, backend_run: dict, corpus_root) -> dict:
             and backend_run.get("abstained") is True
             and coverage(accepted_missing) < coverage(raw_missing)
         ),
+        "unsupported_answer_disagreement": (
+            no_answer_verified and bool(accepted_hits)
+        ),
         "latency_ms": backend_run.get("latency_ms"),
         "peak_working_set_bytes": backend_run.get("peak_working_set_bytes"),
     }
@@ -235,11 +249,19 @@ def run_trials(session: dict, brief: dict, adapters: dict, *, limit: int) -> dic
     if "holdout" in roles and session.get("settings_lock") is None:
         raise SearchLabError("You must lock settings before holdout adapter execution")
     if "development" in roles and session.get("settings_lock") is not None:
-        raise SearchLabError("The settings are locked; development execution is not permitted")
+        raise SearchLabError("The settings are locked. Development execution is not permitted")
+    if "holdout" in roles:
+        locked_backends = session["settings_lock"].get("backends")
+        if not isinstance(locked_backends, dict) or any(
+            backend not in locked_backends
+            or locked_backends[backend].get("limit") != limit
+            for backend in adapters
+        ):
+            raise SearchLabError("Holdout execution does not match the locked settings")
     runs = {}
     for backend, adapter in adapters.items():
         backend_runs = {}
         for trial in brief.get("questions", []):
             backend_runs[trial["id"]] = adapter.query(trial["query"], limit=limit)
-        runs[backend] = backend_runs
+        runs[backend] = {"settings": {"limit": limit}, "trials": backend_runs}
     return runs

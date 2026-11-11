@@ -41,7 +41,14 @@ See `python link.py --help` for the full command list (extract, backfill, lint, 
 
 ### Topic-driven private search lab
 
-`search_lab.py` implements the ADR-0016 research loop. A development brief contains a topic, an argument, exact Sol reference citations, and development questions. `run_trials()` sends the same ordered questions to each configured retrieval adapter. `compare_trial()` reports exact-passage coverage, cited-document coverage, ranks, non-reference documents, abstention behavior, latency, context tokens, and untouched backend scores.
+`search_lab.py` implements the ADR-0016 research loop. A development brief contains a topic or an argument. It also contains exact Sol reference citations and development questions. `run_trials()` sends the same ordered questions to each configured retrieval adapter. `compare_trial()` reports:
+
+- Exact-passage coverage.
+- Cited-document coverage.
+- Ranks and non-reference documents.
+- Abstention behavior.
+- Latency and context tokens.
+- Untouched backend scores.
 
 Record one settings change per development iteration. Lock the selected settings before a separate holdout brief is loaded or executed. The API rejects holdout execution before the lock. It also rejects development execution or tuning after the lock.
 
@@ -52,6 +59,7 @@ python search_lab_cli.py `
   --brief <private-development-brief.json> `
   --holdout-brief <private-holdout-brief.json> `
   --runs <private-backend-runs.json> `
+  --tuning <private-tuning-history.json> `
   --corpus-root <frozen-private-corpus-copy> `
   --settings-lock <private-settings-lock.json> `
   --output <new-private-report.json> `
