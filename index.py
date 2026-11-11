@@ -28,7 +28,7 @@ frontmatter = _load_frontmatter()
 
 logger = logging.getLogger(__name__)
 
-ENTITY_DIRS = ("companies", "technologies", "products", "themes")
+ENTITY_DIRS = ("companies", "technologies", "products", "markets", "themes")
 _HERE = Path(__file__).resolve().parent
 WIKI_ROOT = _HERE.parents[1] / "wiki"
 INDEX_DIR = _HERE.parent / "index"

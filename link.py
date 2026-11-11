@@ -230,13 +230,37 @@ def run_lookup(
         print(f"NOT FOUND: '{name}' — no page or alias resolves to it")
         return 1
 
-    _type_name = {"companies": "company", "technologies": "technology", "products": "product", "themes": "theme"}
-    for d in ("companies", "technologies", "products", "themes"):
+    _type_name = {"companies": "company", "technologies": "technology", "products": "product", "markets": "market", "themes": "theme"}
+    for d in ("companies", "technologies", "products", "markets", "themes"):
         p = wiki_root / d / f"{canonical}.md"
         if p.exists():
             print(f"{canonical} | {_type_name[d]} | {p}")
             return 0
     print(f"{canonical} | (alias target, page file not located) |")
+    return 0
+
+
+def run_cluster(
+    wiki_root: Path = _WIKI_ROOT,
+    cache_dir: Path = _CACHE_DIR,
+    min_sources: int = 5,
+    coverage: float = 0.6,
+) -> int:
+    """Surface entity co-occurrence clusters not yet covered by a theme.
+
+    Writes .tools/extraction-cache/cluster-report.md and prints a summary.
+    Pure measurement — no wiki writes, no LLM.
+    """
+    cluster_mod = _import_module("cluster")
+    from datetime import date
+    report = cluster_mod.render_report(
+        wiki_root, min_sources=min_sources, coverage=coverage,
+        date_str=date.today().isoformat())
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cache_dir / "cluster-report.md"
+    out_path.write_text(report, encoding="utf-8")
+    n = report.count("\n## Candidate")
+    print(f"cluster | uncovered candidates: {n} | report: {out_path}")
     return 0
 
 
@@ -372,10 +396,48 @@ def run_backfill(
     return False
 
 
+def _entity_types(wiki_root: Path) -> dict[str, str]:
+    """Map entity page stem -> page type across the entity dirs."""
+    fm = _import_module("frontmatter")
+    types: dict[str, str] = {}
+    for d in ("companies", "technologies", "products", "markets", "themes"):
+        for page in sorted((wiki_root / d).glob("*.md")) if (wiki_root / d).exists() else []:
+            meta = fm.parse_file(page).metadata or {}
+            t = meta.get("type")
+            if t:
+                types[page.stem] = t
+    return types
+
+
+def _run_relations(sub: str | None, path: str | None) -> None:
+    rel = _import_module("relations")
+    if sub == "extract":
+        if not path:
+            print("ERROR: relations extract requires a source path", file=sys.stderr)
+            sys.exit(1)
+        lex = rel.load_lexicon(_HERE / "predicates.json")
+        types = _entity_types(Path("wiki"))
+        scored = rel.extract_relations(Path(path), types, lex, focus=None)
+        print(json.dumps([{"s": s.rel.s, "p": s.rel.p, "o": s.rel.o,
+                           "by": s.rel.by, "conf": s.conf}
+                          for s in scored if s.accepted], ensure_ascii=False, indent=2))
+    elif sub == "graph":
+        rgraph = _import_module("relation_graph")
+        g = rgraph.build_relation_graph(Path("wiki/sources"))
+        rgraph.export_json(g, Path(".tools/index/relation-graph.json"))
+        rgraph.export_graphml(g, Path(".tools/index/relation-graph.graphml"))
+        print(f"relation graph: {g.number_of_nodes()} nodes, {g.number_of_edges()} edges")
+    else:
+        print("ERROR: relations subcommand must be 'extract' or 'graph'", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deterministic entity linking for 2brain wiki")
-    parser.add_argument("command", help="'backfill' | 'lint' | 'lookup' | 'explain' | 'suggest' | path to raw/*.md")
+    parser.add_argument("command", help="'backfill' | 'cluster' | 'lint' | 'lookup' | 'explain' | 'suggest' | 'relations' | path to raw/*.md")
     parser.add_argument("extra", nargs="?", default=None, help="File path for explain/suggest commands")
+    parser.add_argument("extra2", nargs="?", default=None,
+                        help="Third positional (e.g. relations extract <path>)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cache")
     parser.add_argument("--dry-run", action="store_true", help="Print to stdout, no files written")
     parser.add_argument("--verbose", action="store_true", help="Show per-entity hits")
@@ -391,9 +453,15 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=20, help="Stage 2 top-K (default 20)")
     parser.add_argument("--threshold", type=float, default=None, help="Stage 2 cosine threshold filter")
     parser.add_argument("--rebuild-embeddings", action="store_true", help="Force re-embed entity matrix")
+    parser.add_argument("--min-sources", type=int, default=5,
+                        help="cluster: min shared sources for a co-occurrence link")
+    parser.add_argument("--coverage", type=float, default=0.6,
+                        help="cluster: drop candidates this fraction covered by a theme")
     args = parser.parse_args()
 
-    if args.command == "lint":
+    if args.command == "cluster":
+        sys.exit(run_cluster(min_sources=args.min_sources, coverage=args.coverage))
+    elif args.command == "lint":
         sys.exit(run_lint_cmd(severity_filter=args.severity))
     elif args.command == "backfill":
         aborted = run_backfill(dry_run=args.dry_run, skip_sanity_gate=args.skip_sanity_gate, no_lint=args.no_lint, with_history=args.history)
@@ -414,6 +482,8 @@ def main() -> None:
             print("ERROR: lookup requires a name", file=sys.stderr)
             sys.exit(1)
         sys.exit(run_lookup(args.extra))
+    elif args.command == "relations":
+        _run_relations(sub=args.extra, path=args.extra2)
     else:
         raw_path = Path(args.command)
         if not raw_path.exists():

@@ -35,6 +35,14 @@ Outputs `.tools/extraction-cache/{stem}.json` with `entities` (Stage 1 hits) and
 
 See `python link.py --help` for the full command list (extract, backfill, lint, explain, suggest, history).
 
+Run `python link.py lint` before ingestion or backfill. It reports malformed
+metadata as CRITICAL and exits with code 1. Checks include list types, quoted
+wikilinks in `touches`, vendor strings, source fields, page types, and calendar
+dates. Dates must be `YYYY-MM-DD` or `"?"`; partial dates are reported without
+changing them. Source citations can use `.md`, vault folder paths, headings,
+block references, and display text. A missing folder path remains unresolved
+even when another folder contains the same filename. Lint never changes pages.
+
 ## Retrieval benchmark
 
 `retrieval_benchmark_cli.py` measures GrooveSeek or QMD with the evidence-level metrics from ADR-0014. The command uses one metric implementation for the public fixture and the private benchmark.
@@ -173,7 +181,7 @@ index.py         Build alias manifest + Aho-Corasick automaton from wiki/
 graph.py         touches: → networkx DiGraph (source ↔ entity)
 explain.py       Per-source debug view (every hit + span + context)
 suggest.py       Alias candidate proposer (TF/DF on raw bodies)
-lint.py          8 defensive lints on wiki YAML, alias collisions, broken wikilinks, etc.
+lint.py          14 defensive lints on wiki YAML, metadata, aliases, wikilinks, etc.
 history.py       Append-only backfill history with per-run deltas
 retrieval_benchmark.py      Evidence-group metrics shared by all backends
 retrieval_backends.py       GrooveSeek and QMD result adapters
