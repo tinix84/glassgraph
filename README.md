@@ -104,6 +104,7 @@ Build QMD through `qmd_benchmark_build.py`. This command runs `qmd update` and f
 
 ```powershell
 python qmd_benchmark_build.py `
+  --privacy public `
   --node-executable <node> `
   --qmd-script <qmd-script> `
   --qmd-config <index-name>.yml `
@@ -116,6 +117,8 @@ python qmd_benchmark_build.py `
   --retrieval-model-artifact <model.gguf> `
   --output <new-build-receipt.json>
 ```
+
+Use `--privacy private --queries <private-workbook>` for the private partition. The builder applies the same effective Git-ignore, tracked-file, nested-checkout, and vault-containment checks before it opens the index. Benchmark configurations with collection update hooks are rejected; all three QMD model values must be absolute local files.
 
 The selected QMD collection must contain the complete frozen document roster. Every indexed chunk must have its exact `hash_seq` vector key.
 

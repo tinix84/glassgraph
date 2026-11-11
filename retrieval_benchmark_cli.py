@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import unicodedata
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from tokenizers import Tokenizer
@@ -50,20 +50,11 @@ _QmdYamlLoader.add_implicit_resolver(
 
 
 def _construct_yaml12_int(loader, node):
-    value = loader.construct_scalar(node).replace("_", "")
-    sign = -1 if value.startswith("-") else 1
-    unsigned = value[1:] if value[:1] in "+-" else value
-    if unsigned.startswith(("0b", "0B")):
-        return sign * int(unsigned[2:], 2)
-    if unsigned.startswith(("0o", "0O")):
-        return sign * int(unsigned[2:], 8)
-    if unsigned.startswith(("0x", "0X")):
-        return sign * int(unsigned[2:], 16)
-    return int(value, 10)
+    return int(loader.construct_scalar(node), 10)
 
 
 def _construct_yaml12_float(loader, node):
-    value = loader.construct_scalar(node).replace("_", "")
+    value = loader.construct_scalar(node)
     lowered = value.lower()
     if lowered in (".inf", "+.inf"):
         return math.inf
@@ -78,18 +69,15 @@ _QmdYamlLoader.add_constructor("tag:yaml.org,2002:int", _construct_yaml12_int)
 _QmdYamlLoader.add_constructor("tag:yaml.org,2002:float", _construct_yaml12_float)
 _QmdYamlLoader.add_implicit_resolver(
     "tag:yaml.org,2002:int",
-    re.compile(
-        r"^(?:[-+]?0b[0-1_]+|[-+]?0o[0-7_]+|[-+]?[0-9][0-9_]*|"
-        r"[-+]?0x[0-9a-fA-F_]+)$"
-    ),
+    re.compile(r"^[-+]?[0-9]+$"),
     list("-+0123456789"),
 )
 _QmdYamlLoader.add_implicit_resolver(
     "tag:yaml.org,2002:float",
     re.compile(
-        r"^(?:[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)"
+        r"^(?:[-+]?(?:[0-9]+\.[0-9]*|\.[0-9]+)"
         r"(?:[eE][-+]?[0-9]+)?|"
-        r"[-+]?[0-9][0-9_]*(?:[eE][-+]?[0-9]+)|"
+        r"[-+]?[0-9]+(?:[eE][-+]?[0-9]+)|"
         r"[-+]?\.(?:inf|Inf|INF)|[-+]?\.(?:nan|NaN|NAN))$"
     ),
     list("-+0123456789."),
@@ -282,13 +270,72 @@ def _backend_settings_payload(args) -> dict:
 
 
 def _read_qmd_config(args) -> dict:
-    payload = yaml.load(
-        args.qmd_config.read_text(encoding="utf-8"),
-        Loader=_QmdYamlLoader,
-    )
+    try:
+        payload = yaml.load(
+            args.qmd_config.read_text(encoding="utf-8"),
+            Loader=_QmdYamlLoader,
+        )
+    except yaml.YAMLError as error:
+        raise ValueError("QMD configuration is invalid") from error
     if not isinstance(payload, dict):
         raise ValueError("QMD configuration must be a mapping")
     return payload
+
+
+def _qmd_json_input(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _qmd_json_input(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_qmd_json_input(item) for item in value]
+    return value
+
+
+def _qmd_config_json(args, payload: dict) -> str:
+    node_executable = getattr(args, "node_executable", None) or shutil.which("node")
+    if not node_executable:
+        raise OSError("Node.js is required for QMD configuration hashing")
+    source = json.dumps(
+        _qmd_json_input(payload),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    completed = subprocess.run(
+        [
+            str(node_executable),
+            "-e",
+            "const fs=require('fs');const value=JSON.parse("
+            "fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(value));",
+        ],
+        input=source,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+    )
+    if completed.returncode != 0:
+        raise ValueError("QMD configuration could not be canonicalized")
+    return completed.stdout.decode("utf-8")
+
+
+def _qmd_config_has_update_hooks(payload: dict) -> bool:
+    collections = payload.get("collections")
+    return isinstance(collections, dict) and any(
+        isinstance(collection, dict) and collection.get("update") is not None
+        for collection in collections.values()
+    )
+
+
+def _qmd_config_uses_local_models(payload: dict) -> bool:
+    models = payload.get("models")
+    return isinstance(models, dict) and all(
+        isinstance(models.get(name), str)
+        and Path(models[name]).expanduser().is_absolute()
+        and Path(models[name]).expanduser().is_file()
+        for name in ("embed", "generate", "rerank")
+    )
 
 
 def _qmd_config_uses_model_artifact(args, payload: dict | None = None) -> bool:
@@ -389,9 +436,76 @@ def _qmd_build_receipt_payload(args) -> dict:
     }
 
 
-def _write_qmd_build_receipt(path: Path, args) -> None:
+def _qmd_active_embedding_times(args) -> list[datetime]:
+    fingerprint = _qmd_embedding_fingerprint(args.retrieval_model_id)
+    uri = args.qmd_index_db.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as connection:
+        values = [
+            row[0]
+            for row in connection.execute(
+                "SELECT cv.embedded_at FROM content_vectors AS cv "
+                "JOIN documents AS d ON d.hash = cv.hash "
+                "WHERE d.collection = ? AND d.active = 1 "
+                "AND cv.model = ? AND cv.embed_fingerprint = ?",
+                (
+                    args.collection,
+                    args.retrieval_model_id,
+                    fingerprint,
+                ),
+            )
+        ]
+    if any(not isinstance(value, str) for value in values):
+        raise ValueError("QMD embedding timestamps are invalid")
+    return [
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        for value in values
+    ]
+
+
+def _qmd_build_proof_is_valid(args, proof: object) -> bool:
+    if not isinstance(proof, dict):
+        return False
+    try:
+        started = datetime.fromisoformat(
+            proof["forced_embed_started_at"].replace("Z", "+00:00")
+        )
+        completed = datetime.fromisoformat(
+            proof["forced_embed_completed_at"].replace("Z", "+00:00")
+        )
+        times = _qmd_active_embedding_times(args)
+    except (KeyError, OSError, sqlite3.Error, TypeError, ValueError):
+        return False
+    current_index_hash = _qmd_index_sha256(args.qmd_index_db)
+    return (
+        proof.get("schema_version") == "glassgraph.qmd-build-proof.v1"
+        and isinstance(proof.get("active_chunk_count"), int)
+        and proof["active_chunk_count"] == len(times)
+        and bool(times)
+        and proof.get("post_index_sha256") == current_index_hash
+        and proof.get("pre_index_sha256") != current_index_hash
+        and started.tzinfo is not None
+        and completed.tzinfo is not None
+        and all(embedded_at.tzinfo is not None for embedded_at in times)
+        and started <= completed
+        and all(
+            started - timedelta(milliseconds=10)
+            <= embedded_at
+            <= completed + timedelta(milliseconds=10)
+            for embedded_at in times
+        )
+    )
+
+
+def _write_qmd_build_receipt(
+    path: Path,
+    args,
+    build_proof: dict,
+    *,
+    payload: dict | None = None,
+) -> None:
     """Record the exact QMD runtime, model, corpus, and index built together."""
-    payload = _qmd_build_receipt_payload(args)
+    payload = dict(payload or _qmd_build_receipt_payload(args))
+    payload["build_proof"] = build_proof
     with path.open("x", encoding="utf-8", newline="\n") as target:
         json.dump(payload, target, ensure_ascii=False, indent=2, sort_keys=True)
         target.write("\n")
@@ -400,7 +514,10 @@ def _write_qmd_build_receipt(path: Path, args) -> None:
 def _qmd_build_receipt_is_valid(args) -> bool:
     try:
         payload = json.loads(args.qmd_build_receipt.read_text(encoding="utf-8"))
-        return payload == _qmd_build_receipt_payload(args)
+        proof = payload.pop("build_proof", None)
+        return payload == _qmd_build_receipt_payload(
+            args
+        ) and _qmd_build_proof_is_valid(args, proof)
     except (
         AttributeError,
         json.JSONDecodeError,
@@ -465,11 +582,7 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
     }
     try:
         config_hash = hashlib.sha256(
-            json.dumps(
-                config_payload,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode()
+            _qmd_config_json(args, config_payload).encode("utf-8")
         ).hexdigest()
         source_root = Path(args.corpus_root).resolve()
         if not _backend_source_matches_benchmark(args, source_root):
@@ -510,7 +623,9 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
                 row[1]
                 for row in connection.execute("PRAGMA table_info(content_vectors)")
             }
-            if not {"seq", "embed_fingerprint"}.issubset(vector_columns):
+            if not {"seq", "embed_fingerprint", "embedded_at"}.issubset(
+                vector_columns
+            ):
                 return False
             covered_documents = connection.execute(
                 "SELECT COUNT(*) FROM documents AS d "
@@ -558,7 +673,13 @@ def _qmd_index_is_ready(args, config_payload: dict) -> bool:
                     expected_fingerprint,
                 ),
             ).fetchone()[0]
-    except (OSError, sqlite3.Error, TypeError, ValueError):
+    except (
+        OSError,
+        sqlite3.Error,
+        subprocess.SubprocessError,
+        TypeError,
+        ValueError,
+    ):
         return False
     return (
         bool(expected_documents)
@@ -654,10 +775,16 @@ def _private_backend_paths(args) -> list[Path]:
     ]
 
 
-def _git_command(vault_root: Path, arguments: list[str]):
+def _git_command(
+    vault_root: Path,
+    arguments: list[str],
+    *,
+    input_data: bytes | None = None,
+):
     return subprocess.run(
         ["git", "-C", str(vault_root), *arguments],
         check=False,
+        input=input_data,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         timeout=5,
@@ -703,18 +830,28 @@ def _private_git_paths_are_unpublished(
     for path in paths:
         if path.is_dir():
             candidates.update(item.resolve() for item in path.rglob("*") if item.is_file())
+    relative_paths = []
     for path in candidates:
         try:
-            relative = path.relative_to(repository_root).as_posix()
+            relative_paths.append(path.relative_to(repository_root).as_posix())
         except ValueError:
             return False
-        ignored = _git_command(
-            repository_root,
-            ["check-ignore", "-q", "--no-index", "--", relative],
-        )
-        if ignored.returncode != 0:
-            return False
-    return True
+    check_input = b"\0".join(
+        relative.encode("utf-8") for relative in relative_paths
+    ) + b"\0"
+    ignored = _git_command(
+        repository_root,
+        ["check-ignore", "--no-index", "-z", "--stdin"],
+        input_data=check_input,
+    )
+    if ignored.returncode not in (0, 1):
+        return False
+    ignored_paths = {
+        value.decode("utf-8")
+        for value in ignored.stdout.split(b"\0")
+        if value
+    }
+    return ignored_paths == set(relative_paths)
 
 
 def _private_paths_are_vault_local(args) -> bool:

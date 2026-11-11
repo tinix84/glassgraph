@@ -309,10 +309,7 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
         "  rerank: local-rerank.gguf\n"
         "flags:\n"
         "  enabled: true\n"
-        "  legacy_word: on\n"
-        "numbers:\n"
-        "  leading_zero_decimal: 0123\n"
-        "  explicit_octal: 0o77\n",
+        "  legacy_word: on\n",
         encoding="utf-8",
     )
     args = SimpleNamespace(qmd_config=config)
@@ -321,10 +318,42 @@ def test_qmd_config_uses_yaml_1_2_boolean_rules(
 
     assert "on" in payload["collections"]
     assert payload["flags"] == {"enabled": True, "legacy_word": "on"}
-    assert payload["numbers"] == {
+
+
+def test_qmd_config_matches_installed_yaml_and_json_number_semantics(
+    tmp_path, retrieval_benchmark_cli_mod
+):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is not installed")
+    config = tmp_path / "fixture.yml"
+    config.write_text(
+        "values:\n"
+        "  leading_zero_decimal: 0123\n"
+        "  exponent: 1e3\n"
+        "  infinity: .inf\n"
+        "  binary_text: 0b10\n"
+        "  hex_text: +0xFF\n"
+        "  underscore_text: 1_000\n",
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(qmd_config=config, node_executable=node)
+
+    payload = retrieval_benchmark_cli_mod._read_qmd_config(args)
+
+    assert payload["values"] == {
         "leading_zero_decimal": 123,
-        "explicit_octal": 63,
+        "exponent": 1000.0,
+        "infinity": float("inf"),
+        "binary_text": "0b10",
+        "hex_text": "+0xFF",
+        "underscore_text": "1_000",
     }
+    assert retrieval_benchmark_cli_mod._qmd_config_json(args, payload) == (
+        '{"values":{"leading_zero_decimal":123,"exponent":1000,'
+        '"infinity":null,"binary_text":"0b10","hex_text":"+0xFF",'
+        '"underscore_text":"1_000"}}'
+    )
 
 
 def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
@@ -371,7 +400,8 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
                 seq INTEGER NOT NULL,
                 model TEXT NOT NULL,
                 embed_fingerprint TEXT NOT NULL,
-                total_chunks INTEGER NOT NULL
+                total_chunks INTEGER NOT NULL,
+                embedded_at TEXT NOT NULL
             );
             CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
             CREATE TABLE vectors_vec_rowids (id TEXT NOT NULL);
@@ -386,11 +416,12 @@ def test_qmd_index_preflight_requires_synced_config_and_vector_coverage(
             (document_hash,),
         )
         connection.execute(
-            "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1)",
+            "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1, ?)",
             (
                 document_hash,
                 str(model),
                 _expected_qmd_embedding_fingerprint(str(model)),
+                "2000-01-01T00:00:00.000Z",
             ),
         )
         connection.execute(
@@ -1277,7 +1308,10 @@ def _public_qmd_args(
     script.parent.mkdir(parents=True)
     (package / "package.json").write_text('{"name":"qmd"}', encoding="utf-8")
     script.write_text("// fixture", encoding="utf-8")
-    node = artifact_root / "node.exe"
+    node_executable = shutil.which("node")
+    if node_executable is None:
+        pytest.skip("Node.js is not installed")
+    node = Path(node_executable)
     tokenizer = artifact_root / "tokenizer.json"
     model = artifact_root / "model.gguf"
     config = artifact_root / "fixture.yml"
@@ -1292,7 +1326,6 @@ def _public_qmd_args(
         },
     }
     for path, content in (
-        (node, "node"),
         (tokenizer, "tokenizer"),
         (model, "GGUF fixture"),
         (config, yaml.safe_dump(config_payload, sort_keys=False)),
@@ -1321,7 +1354,8 @@ def _public_qmd_args(
                 seq INTEGER NOT NULL,
                 model TEXT NOT NULL,
                 embed_fingerprint TEXT NOT NULL,
-                total_chunks INTEGER NOT NULL
+                total_chunks INTEGER NOT NULL,
+                embedded_at TEXT NOT NULL
             );
             CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
             CREATE TABLE vectors_vec_rowids (id TEXT NOT NULL);
@@ -1342,11 +1376,12 @@ def _public_qmd_args(
                 (index, relative, document_hash),
             )
             connection.execute(
-                "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1)",
+                "INSERT INTO content_vectors VALUES (?, 0, ?, ?, 1, ?)",
                 (
                     document_hash,
                     str(model.resolve()),
                     _expected_qmd_embedding_fingerprint(str(model.resolve())),
+                    "2000-01-01T00:00:00.000Z",
                 ),
             )
             connection.execute(
@@ -1356,6 +1391,12 @@ def _public_qmd_args(
     def run_build(command, environment):
         if command_log is not None:
             command_log.append((command, environment))
+        if "embed" in command:
+            with sqlite3.connect(index_db) as connection:
+                connection.execute(
+                    "UPDATE content_vectors SET embedded_at = "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+                )
         return {
             "stdout": "",
             "stderr": "",
@@ -1366,6 +1407,7 @@ def _public_qmd_args(
     assert qmd_benchmark_build_mod.main(
         [
             "--node-executable", str(node),
+            "--privacy", "public",
             "--qmd-script", str(script),
             "--qmd-config", str(config),
             "--qmd-index-db", str(index_db),
@@ -1429,15 +1471,143 @@ def test_qmd_build_receipt_detects_model_replacement(
         qmd_config=Path(value("--qmd-config")),
         qmd_index_db=Path(value("--qmd-index-db")),
         qmd_build_receipt=Path(value("--qmd-build-receipt")),
+        collection=value("--collection"),
         retrieval_model_id=value("--retrieval-model-id"),
         retrieval_model_artifact=Path(value("--retrieval-model-artifact")),
         corpus_root=Path(value("--corpus-root")),
     )
+    receipt = json.loads(args.qmd_build_receipt.read_text(encoding="utf-8"))
+    assert receipt["build_proof"]["active_chunk_count"] == 1
+    assert (
+        receipt["build_proof"]["pre_index_sha256"]
+        != receipt["build_proof"]["post_index_sha256"]
+    )
     assert retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
 
-    args.retrieval_model_artifact.write_text("replaced weights", encoding="utf-8")
+    no_op_receipt = tmp_path / "no-op-build-receipt.json"
+    with pytest.raises(SystemExit) as no_op_error:
+        qmd_benchmark_build_mod.main(
+            [
+                "--privacy", "public",
+                "--node-executable", value("--node-executable"),
+                "--qmd-script", value("--qmd-script"),
+                "--qmd-config", value("--qmd-config"),
+                "--qmd-index-db", value("--qmd-index-db"),
+                "--index", value("--index"),
+                "--collection", value("--collection"),
+                "--corpus-root", value("--corpus-root"),
+                "--benchmark-corpus-root", str(corpus_root),
+                "--retrieval-model-id", value("--retrieval-model-id"),
+                "--retrieval-model-artifact", value("--retrieval-model-artifact"),
+                "--output", str(no_op_receipt),
+            ],
+            process_runner=lambda *_args: {
+                "stdout": "",
+                "stderr": "",
+                "elapsed_ms": 1.0,
+                "peak_working_set_bytes": 1,
+            },
+        )
+    assert no_op_error.value.code == 2
+    assert not no_op_receipt.exists()
+
+    race_receipt = tmp_path / "raced-build-receipt.json"
+
+    def race_build(command, _environment):
+        if "embed" in command:
+            args.retrieval_model_artifact.write_text(
+                "replaced weights",
+                encoding="utf-8",
+            )
+            with sqlite3.connect(args.qmd_index_db) as connection:
+                connection.execute(
+                    "UPDATE content_vectors SET embedded_at = "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+                )
+        return {
+            "stdout": "",
+            "stderr": "",
+            "elapsed_ms": 1.0,
+            "peak_working_set_bytes": 1,
+        }
+
+    with pytest.raises(SystemExit) as race_error:
+        qmd_benchmark_build_mod.main(
+            [
+                "--privacy", "public",
+                "--node-executable", value("--node-executable"),
+                "--qmd-script", value("--qmd-script"),
+                "--qmd-config", value("--qmd-config"),
+                "--qmd-index-db", value("--qmd-index-db"),
+                "--index", value("--index"),
+                "--collection", value("--collection"),
+                "--corpus-root", value("--corpus-root"),
+                "--benchmark-corpus-root", str(corpus_root),
+                "--retrieval-model-id", value("--retrieval-model-id"),
+                "--retrieval-model-artifact", value("--retrieval-model-artifact"),
+                "--output", str(race_receipt),
+            ],
+            process_runner=race_build,
+        )
+    assert race_error.value.code == 2
+    assert not race_receipt.exists()
 
     assert not retrieval_benchmark_cli_mod._qmd_build_receipt_is_valid(args)
+
+
+def test_qmd_benchmark_build_rejects_update_hooks(
+    retrieval_benchmark_cli_mod,
+):
+    payload = {
+        "collections": {
+            "private": {
+                "path": "D:/vault/wiki",
+                "pattern": "**/*.md",
+                "update": "curl https://example.invalid/private",
+            }
+        }
+    }
+
+    assert retrieval_benchmark_cli_mod._qmd_config_has_update_hooks(payload)
+
+
+def test_private_qmd_builder_rejects_public_checkout_before_execution(
+    tmp_path,
+    qmd_benchmark_build_mod,
+):
+    workspace = _private_workspace(tmp_path)
+    workbook = workspace / "workbook.json"
+    workbook.write_text("{}", encoding="utf-8")
+    benchmark_corpus = tmp_path / "wiki"
+    benchmark_corpus.mkdir()
+    public_checkout = tmp_path / ".tools" / "entity_linker"
+    (public_checkout / ".git").mkdir(parents=True)
+    qmd_root = public_checkout / "private-qmd"
+    qmd_root.mkdir()
+    receipt = qmd_root / "receipt.json"
+
+    with pytest.raises(SystemExit) as error:
+        qmd_benchmark_build_mod.main(
+            [
+                "--privacy", "private",
+                "--queries", str(workbook),
+                "--node-executable", "node",
+                "--qmd-script", "qmd",
+                "--qmd-config", str(qmd_root / "config.yml"),
+                "--qmd-index-db", str(qmd_root / "index.sqlite"),
+                "--index", "private",
+                "--collection", "private",
+                "--corpus-root", str(qmd_root / "corpus"),
+                "--benchmark-corpus-root", str(benchmark_corpus),
+                "--retrieval-model-id", "D:/models/embed.gguf",
+                "--retrieval-model-artifact", "D:/models/embed.gguf",
+                "--output", str(receipt),
+            ],
+            process_runner=lambda *_args: pytest.fail("QMD must not run"),
+        )
+
+    assert error.value.code == 2
+    assert not receipt.exists()
 
 
 def test_public_cli_prints_aggregate_only(
@@ -1766,7 +1936,7 @@ def _private_boundary_args(workspace, corpus_root, output=None):
 
 
 def test_private_workspace_allows_ignored_vault_git_root(
-    tmp_path, retrieval_benchmark_cli_mod
+    tmp_path, monkeypatch, retrieval_benchmark_cli_mod
 ):
     workspace = _private_workspace(tmp_path)
     _init_git_repository(tmp_path)
@@ -1777,8 +1947,21 @@ def test_private_workspace_allows_ignored_vault_git_root(
     corpus_root = tmp_path / "wiki"
     corpus_root.mkdir()
     args = _private_boundary_args(workspace, corpus_root)
+    original_git_command = retrieval_benchmark_cli_mod._git_command
+    commands = []
+
+    def counting_git_command(root, arguments, **kwargs):
+        commands.append(arguments)
+        return original_git_command(root, arguments, **kwargs)
+
+    monkeypatch.setattr(
+        retrieval_benchmark_cli_mod,
+        "_git_command",
+        counting_git_command,
+    )
 
     assert retrieval_benchmark_cli_mod._private_paths_are_vault_local(args)
+    assert len(commands) == 3
 
 
 def test_private_workspace_rejects_nested_git_checkout(
