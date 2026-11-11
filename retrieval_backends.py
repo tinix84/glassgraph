@@ -109,7 +109,10 @@ class GrooveSeekAdapter:
         config: str | Path | None = None,
         model: str | None = None,
         model_cache: str | Path | None = None,
+        low_confidence_policy: str = "abstain",
     ) -> None:
+        if low_confidence_policy not in {"abstain", "preserve"}:
+            raise ValueError("Unknown GrooveSeek low-confidence policy")
         self.executable = executable
         self.knowledge_base = knowledge_base
         self.process_runner = process_runner
@@ -117,6 +120,7 @@ class GrooveSeekAdapter:
         self.path_prefix = path_prefix
         self.config = str(config) if config is not None else None
         self.model = model
+        self.low_confidence_policy = low_confidence_policy
         self.model_cache = (
             str(Path(model_cache).resolve()) if model_cache is not None else None
         )
@@ -189,11 +193,13 @@ class GrooveSeekAdapter:
                 }
             )
 
-        abstained = payload.get("low_confidence") is True
+        low_confidence = payload.get("low_confidence") is True
+        abstained = low_confidence and self.low_confidence_policy == "abstain"
         return {
             "hits": [] if abstained else raw_hits,
             "raw_hits": raw_hits,
             "abstained": abstained,
+            "low_confidence": low_confidence,
             "latency_ms": measured["elapsed_ms"],
             "peak_working_set_bytes": measured["peak_working_set_bytes"],
         }

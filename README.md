@@ -39,6 +39,27 @@ See `python link.py --help` for the full command list (extract, backfill, lint, 
 
 `retrieval_benchmark_cli.py` measures GrooveSeek or QMD with the evidence-level metrics from ADR-0014. The command uses one metric implementation for the public fixture and the private benchmark.
 
+### Topic-driven private search lab
+
+`search_lab.py` implements the ADR-0016 research loop. A development brief contains a topic, an argument, exact Sol reference citations, and development questions. `run_trials()` sends the same ordered questions to each configured retrieval adapter. `compare_trial()` reports exact-passage coverage, cited-document coverage, ranks, non-reference documents, abstention behavior, latency, context tokens, and untouched backend scores.
+
+Record one settings change per development iteration. Lock the selected settings before a separate holdout brief is loaded or executed. The API rejects holdout execution before the lock. It also rejects development execution or tuning after the lock.
+
+`search_lab_cli.py` creates a private offline report from local brief, run, lock, and holdout files:
+
+```powershell
+python search_lab_cli.py `
+  --brief <private-development-brief.json> `
+  --holdout-brief <private-holdout-brief.json> `
+  --runs <private-backend-runs.json> `
+  --corpus-root <frozen-private-corpus-copy> `
+  --settings-lock <private-settings-lock.json> `
+  --output <new-private-report.json> `
+  --offline-verified
+```
+
+All four private JSON inputs and the report must stay in `.glassgraph/benchmarks/private/v1/`. The report preserves private query-level material. Do not publish it. Publish only aggregate measurements and decisions.
+
 Run the public fixture with GrooveSeek:
 
 ```powershell

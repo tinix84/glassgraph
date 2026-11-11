@@ -128,6 +128,16 @@ def retrieval_benchmark_cli_mod():
 
 
 @pytest.fixture(scope="session")
+def search_lab_mod():
+    return _load("search_lab")
+
+
+@pytest.fixture(scope="session")
+def search_lab_cli_mod():
+    return _load("search_lab_cli")
+
+
+@pytest.fixture(scope="session")
 def qmd_benchmark_build_mod():
     return _load("qmd_benchmark_build")
 

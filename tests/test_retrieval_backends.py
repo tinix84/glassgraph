@@ -84,6 +84,35 @@ def test_grooveseek_adapter_preserves_raw_hit_and_explicit_abstention(retrieval_
     )
 
 
+def test_grooveseek_can_preserve_low_confidence_candidates_for_research_review(
+    retrieval_backends_mod,
+):
+    adapter = retrieval_backends_mod.GrooveSeekAdapter(
+        executable="groove",
+        knowledge_base="corpus",
+        process_runner=lambda *_args: {
+            "stdout": json.dumps(
+                {
+                    "results": [
+                        {"score": 0.03, "path": "evidence.md", "content": "Evidence."}
+                    ],
+                    "low_confidence": True,
+                }
+            ),
+            "elapsed_ms": 1,
+            "peak_working_set_bytes": 2,
+        },
+        token_counter=lambda _text: 1,
+        low_confidence_policy="preserve",
+    )
+
+    run = adapter.query("evidence", limit=5)
+
+    assert run["abstained"] is False
+    assert run["low_confidence"] is True
+    assert run["hits"] == run["raw_hits"]
+
+
 def test_grooveseek_adapter_preserves_leading_dot_in_filename(retrieval_backends_mod):
     adapter = retrieval_backends_mod.GrooveSeekAdapter(
         executable="groove",
