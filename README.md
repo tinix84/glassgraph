@@ -46,8 +46,52 @@ errors, warnings = validate_meta(page.metadata, "company")
 The package supplies parsing, structural validation, and writer policy.
 The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
 Existing scripts retain their commands and dependencies below.
-The package adds no CLI or vault-discovery rule.
+The package exposes the portable lint command below. Other scripts retain their existing entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
+
+### Run portable lint
+
+```powershell
+glassgraph --root 'D:\vault' lint
+glassgraph lint --root 'D:\vault' --severity WARN
+python -m glassgraph lint
+```
+
+Root resolution uses this order:
+
+1. Use the `--root` directory.
+2. Use `GLASSGRAPH_ROOT` when no flag is supplied.
+3. Search upward from the current directory for the nearest `.glassgraph/` directory.
+
+An invalid explicit or environment root is an error. Discovery never uses the code checkout's location.
+The shared `discover_root(start=...)` interface also accepts a target file's parent directory for hook integration.
+
+The optional `<vault>/.glassgraph/config.toml` file supports:
+
+```toml
+[paths]
+wiki = "wiki"
+raw = "raw"
+entity_dirs = ["companies", "technologies", "products", "markets", "themes"]
+exclude = [".temp"]
+```
+
+These defaults preserve existing lint directory order and first-owner alias resolution.
+`sources/` is always a source directory. Additional entity directories use each page's declared type.
+Directory names must be unique single path components. `sources` is reserved.
+Exclusions are file or directory paths relative to the vault root, not glob patterns.
+Configured wiki, raw, and excluded paths must stay inside the vault. Scanned links that leave the vault are configuration errors.
+When the raw path is the default `raw`, lint also resolves legacy `raw-CN` citation targets.
+
+The optional `[zotero].db` field accepts an explicit database path, relative to the vault or absolute.
+Its default is unset. Lint does not open a Zotero database.
+Unknown fields and malformed configuration are errors.
+
+Lint reads the configured corpus and prints its existing report format. It does not create caches, reports, or migrated state.
+Exit codes are `0` for no critical findings, `1` for critical findings, and `2` for configuration or read errors.
+The severity filter changes displayed findings only. It cannot hide a failing exit code.
+The legacy `lint.py` import delegates to the same implementation.
+The remaining commands and state migration are covered by [issue #4](https://github.com/tinix84/glassgraph/issues/4).
 
 ### Run the existing linker
 
