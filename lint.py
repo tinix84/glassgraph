@@ -1,8 +1,21 @@
 """Compatibility import for the packaged deterministic lint authority."""
 import sys
+import importlib.util
+from pathlib import Path
 
-import frontmatter  # Bootstrap an uninstalled source checkout.
-from glassgraph.core import lint as _implementation
+try:
+    from glassgraph.core import lint as _implementation
+except ModuleNotFoundError as error:
+    if error.name != "glassgraph":
+        raise
+    # Bootstrap package code without changing the caller's import path.
+    _spec = importlib.util.spec_from_file_location(
+        "_glassgraph_lint_bootstrap", Path(__file__).resolve().with_name("frontmatter.py"),
+    )
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules[_spec.name] = _module
+    _spec.loader.exec_module(_module)
+    from glassgraph.core import lint as _implementation
 
 sys.modules[__name__] = _implementation
 
