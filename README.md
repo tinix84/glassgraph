@@ -306,6 +306,14 @@ aliases_cn: [...]
 
 Source pages under `wiki/sources/*.md` carry a `touches: ['[[Entity]]', ...]` frontmatter field that builds the graph.
 
+## Release qualification and delivery
+
+The normative [release gates](https://github.com/tinix84/glassgraph/issues/23) distinguish core release requirements from optional local-model admission.
+An unmeasured gate does not pass. Contract prototypes and passing synthetic tests do not establish release readiness.
+The [implementation route](https://github.com/tinix84/glassgraph/issues/24) sequences portable integration, compiler lifecycle, retrieval integration, and qualification.
+Existing graph, relation, local-model, and editorial issues retain their own scope.
+See [ADR-0020](docs/adr/ADR-0020-v1-release-gate-profiles.md) and [ADR-0021](docs/adr/ADR-0021-v1-delivery-sequencing.md) for the decisions.
+
 ## Status
 
 **Experimental / personal-research origin.** Built for a power-electronics and EV-powertrain research corpus. Shared validation supports an editable installation. Existing CLI scripts require a source checkout and their listed dependencies. The internal interfaces have no compatibility guarantee.
