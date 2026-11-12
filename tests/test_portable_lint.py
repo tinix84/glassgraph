@@ -2,6 +2,7 @@
 import subprocess
 import sys
 import pytest
+from pathlib import Path
 
 
 def test_portable_lint_matches_legacy_report_and_exit_code(tmp_path, lint_mod, capsys):
@@ -137,3 +138,28 @@ def test_reordered_directories_preserve_type_checks_and_source_exclusions(tmp_pa
     (sources / "Invalid.md").write_text("---\ntype: [broken\n---\n", encoding="utf-8")
     assert main(["--root", str(tmp_path), "lint"]) == 0
     assert capsys.readouterr().out == "Lint: 0 findings. ✓\n\n"
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_legacy_file_import_works_outside_checkout(tmp_path, installed):
+    script = """
+import importlib.util, sys, sysconfig
+if sys.argv[2] == 'source':
+    sys.path.append(sysconfig.get_path('purelib'))
+spec = importlib.util.spec_from_file_location('legacy_lint', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+from glassgraph.core import lint
+assert module.run_lint is lint.run_lint
+assert module.format_report([]).startswith('Lint: 0')
+print('Isolated legacy import passed')
+"""
+    arguments = [sys.executable, "-I", "-B"]
+    if not installed:
+        arguments.append("-S")
+    shim = Path(__file__).resolve().parents[1] / "lint.py"
+    result = subprocess.run(arguments + ["-c", script, str(shim), "installed" if installed else "source"],
+                            cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "Isolated legacy import passed\n"
