@@ -49,4 +49,3 @@ Optional inference can remain disabled while the core qualifies independently.
 A successful run on a larger host does not establish minimum-hardware compatibility.
 Gate changes require a new decision and a new comparable evaluation record.
 Issue #6 remains the owner of runtime integration and model admission.
-

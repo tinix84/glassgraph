@@ -41,4 +41,3 @@ Each scheduled increment gets its own implementation issue, acceptance evidence,
 Existing issues remain linked, without rewritten history or automatic closure.
 The roadmap decision can finish while product implementation and benchmark adjudication remain unfinished.
 Data migration and file retirement retain their separate safety and approval requirements.
-
