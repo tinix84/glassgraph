@@ -26,6 +26,31 @@ If you want first-class community detection, INFERRED edges, or semantic cluster
 
 ## Quick start
 
+### Install shared validation
+
+Install the validation package from this checkout:
+
+```bash
+python -m pip install -e .
+```
+
+```python
+from glassgraph.core.frontmatter import parse, validate_metadata
+from glassgraph.wiki.schema import validate_meta
+
+page = parse("---\ntype: company\n---\nBody.\n")
+errors = validate_metadata(page.metadata, "company")
+errors, warnings = validate_meta(page.metadata, "company")
+```
+
+The package supplies parsing, structural validation, and writer policy.
+The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
+Existing scripts retain their commands and dependencies below.
+The package adds no CLI or vault-discovery rule.
+See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
+
+### Run the existing linker
+
 ```bash
 pip install pyahocorasick networkx pyyaml sentence-transformers torch
 python link.py path/to/source.md

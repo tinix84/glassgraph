@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-_TOOLS = Path(__file__).resolve().parents[2]  # .tools/
+_REPO = Path(__file__).resolve().parents[1]
 
 
 def _load(name: str) -> object:
     if name in sys.modules:
         return sys.modules[name]
-    src = _TOOLS / "entity_linker" / f"{name}.py"
+    src = _REPO / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, src)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod

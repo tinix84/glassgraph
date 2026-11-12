@@ -21,3 +21,4 @@ Decisions for glassgraph and the 2brain vault it serves. Specs live as GitHub is
 | [ADR-0015-v1-typed-relation-boundary](ADR-0015-v1-typed-relation-boundary.md) | 2026-11-09 | Limit canonical relations to authored, exact-derived, adjudicated, or evidence-qualified assertions |
 | [ADR-0016-topic-driven-private-search-lab](ADR-0016-topic-driven-private-search-lab.md) | 2026-11-11 | Evaluate and tune retrieval through topic-driven private research sessions with disagreement review |
 | [ADR-0017-grooveseek-v1-default-retrieval-backend](ADR-0017-grooveseek-v1-default-retrieval-backend.md) | 2026-11-11 | Use GrooveSeek as the v1 default retrieval backend |
+| [ADR-0018-incremental-package-consolidation](ADR-0018-incremental-package-consolidation.md) | 2026-11-12 | Consolidate validation in one package before migrating vault operations |
