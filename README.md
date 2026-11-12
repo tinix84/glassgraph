@@ -256,7 +256,7 @@ Source pages under `wiki/sources/*.md` carry a `touches: ['[[Entity]]', ...]` fr
 
 ## Status
 
-**Experimental / personal-research origin.** Built for one corpus (power-electronics & EV powertrain research clippings). Battle-tested on ~500 sources with ~1400 entity pages. Not packaged, not pip-installable, no semver guarantees. The CLI surface is stable but the internal API is not.
+**Experimental / personal-research origin.** Built for a power-electronics and EV-powertrain research corpus. Shared validation supports an editable installation. Existing CLI scripts require a source checkout and their listed dependencies. The internal interfaces have no compatibility guarantee.
 
 ## Inspiration & acknowledgements
 
