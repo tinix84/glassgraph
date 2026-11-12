@@ -34,7 +34,7 @@ def build_packet(corpus_root, query: str, evidence: list[dict]) -> dict:
     if not isinstance(evidence, list) or len(evidence) > MAX_EVIDENCE:
         raise AssistError("Supply at most 20 evidence records")
     try:
-        if len(_bytes({"query": query, "evidence": evidence})) > MAX_PACKET_BYTES - 200:
+        if len(_bytes({"query": query, "evidence": evidence})) > MAX_PACKET_BYTES:
             raise AssistError("Reduce the evidence packet below the byte budget")
         current = []
         seen = set()

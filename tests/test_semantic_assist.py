@@ -169,6 +169,16 @@ def test_packet_budget_deduplication_and_empty_evidence(packet_case):
     assert apply_advice(root, empty)["packet"]["evidence"] == []
 
 
+def test_packet_accepts_the_exact_documented_byte_boundary(tmp_path):
+    from glassgraph.assist import AssistError, build_packet
+
+    packet = build_packet(tmp_path, "x" * 32607, [])
+    assert len(json.dumps(packet, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8")) == 32768
+    with pytest.raises(AssistError, match="byte budget"):
+        build_packet(tmp_path, "x" * 32608, [])
+
+
 def test_edit_outside_passage_and_tampered_query_are_rejected(packet_case):
     from glassgraph.assist import AssistError, validate_packet
 
