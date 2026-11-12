@@ -13,6 +13,7 @@ We require measured core release gates and separate admission gates for each opt
 
 Issue #23 owns the exact gate definitions and measurement protocol.
 Earlier decisions fix evidence identity, relation qualification, benchmark privacy, and retrieval speed.
+ADR-0016 supplies topic-driven reference search, holdout briefs, and owner review of material disagreements.
 The assist prototype validates supplied output but does not attest a model or establish semantic grounding.
 Specification completion must not be mistaken for release readiness.
 
@@ -31,7 +32,8 @@ Preserve existing evidence, relation, privacy, and speed requirements.
 Add explicit targets for relevance, no-answer behavior, memory, editor independence, and context efficiency.
 These targets are design choices, not measured claims.
 Strict evidence and lifecycle gates protect Markdown authority.
-Quality targets require the frozen private benchmark, not synthetic success alone.
+Quality targets require ADR-0016's frozen private search trials and reference-relative measurements as well as synthetic regression tests.
+The owner reviews research briefs and material conclusions; the research agent performs reference-search bookkeeping.
 Memory headroom and context caps protect the minimum-hardware profile.
 Token efficiency must retain required evidence and count serialization overhead.
 
@@ -48,6 +50,3 @@ A successful run on a larger host does not establish minimum-hardware compatibil
 Gate changes require a new decision and a new comparable evaluation record.
 Issue #6 remains the owner of runtime integration and model admission.
 
-## Status
-
-Proposed for the issues #23–#24 integration on 2026-11-12.

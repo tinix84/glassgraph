@@ -29,6 +29,7 @@ Pre-existing relation, graph, content, and comparison issues retain their own sc
 Use the dependency route in [issue #24](https://github.com/tinix84/glassgraph/issues/24).
 Complete the portable execution context before exposing root-dependent compiler commands.
 Implement manifests and invalidation before attaching retrieval and advisory consumers to canonical output.
+Prepare topic-driven reference inputs before the locked retrieval evaluation that consumes them.
 Require the ADR-0020 gates before making a release claim.
 Allow qualified relation expansion after canonical evidence exists.
 Keep local inference optional and gated by operation.
@@ -41,6 +42,3 @@ Existing issues remain linked, without rewritten history or automatic closure.
 The roadmap decision can finish while product implementation and benchmark adjudication remain unfinished.
 Data migration and file retirement retain their separate safety and approval requirements.
 
-## Status
-
-Proposed for the issues #23–#24 integration on 2026-11-12.
