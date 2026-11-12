@@ -19,7 +19,7 @@ def _load(name: str) -> object:
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
-    return mod
+    return sys.modules[name]
 
 
 @pytest.fixture(scope="session")
