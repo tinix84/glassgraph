@@ -26,6 +26,31 @@ If you want first-class community detection, INFERRED edges, or semantic cluster
 
 ## Quick start
 
+### Install shared validation
+
+Install the validation package from this checkout:
+
+```bash
+python -m pip install -e .
+```
+
+```python
+from glassgraph.core.frontmatter import parse, validate_metadata
+from glassgraph.wiki.schema import validate_meta
+
+page = parse("---\ntype: company\n---\nBody.\n")
+errors = validate_metadata(page.metadata, "company")
+errors, warnings = validate_meta(page.metadata, "company")
+```
+
+The package supplies parsing, structural validation, and writer policy.
+The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
+Existing scripts retain their commands and dependencies below.
+The package adds no CLI or vault-discovery rule.
+See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
+
+### Run the existing linker
+
 ```bash
 pip install pyahocorasick networkx pyyaml sentence-transformers torch
 python link.py path/to/source.md
@@ -231,7 +256,7 @@ Source pages under `wiki/sources/*.md` carry a `touches: ['[[Entity]]', ...]` fr
 
 ## Status
 
-**Experimental / personal-research origin.** Built for one corpus (power-electronics & EV powertrain research clippings). Battle-tested on ~500 sources with ~1400 entity pages. Not packaged, not pip-installable, no semver guarantees. The CLI surface is stable but the internal API is not.
+**Experimental / personal-research origin.** Built for a power-electronics and EV-powertrain research corpus. Shared validation supports an editable installation. Existing CLI scripts require a source checkout and their listed dependencies. The internal interfaces have no compatibility guarantee.
 
 ## Inspiration & acknowledgements
 
