@@ -5,5 +5,5 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 
-# mkdocs build output (deployed via gh-deploy to gh-pages branch)
+# MkDocs build output for the documentation deployment workflow.
 site/
