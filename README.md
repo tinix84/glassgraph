@@ -68,6 +68,58 @@ changing them. Source citations can use `.md`, vault folder paths, headings,
 block references, and display text. A missing folder path remains unresolved
 even when another folder contains the same filename. Lint never changes pages.
 
+## Private semantic-assist prototype
+
+`glassgraph.assist` validates evidence packets and supplied advisory output.
+It does not execute a model or contact a runtime.
+
+```python
+from glassgraph.assist import build_packet, apply_advice
+from glassgraph.core.retrieval_benchmark import derive_evidence_records
+
+records = derive_evidence_records(corpus_root, {"path": "example.md", "text": "Exact passage."})
+packet = build_packet(corpus_root, "Research question?", records)
+deterministic = apply_advice(corpus_root, packet)
+review_candidate = apply_advice(corpus_root, packet, enabled=True, response=local_output_json)
+```
+
+Each evidence record is verified against current Markdown, including its source hash and exact locator.
+Packets preserve evidence order and reject oversized input without truncation.
+Limits are 20 records and 32,768 UTF-8 bytes per packet, and 8,192 UTF-8 bytes per output.
+These limits are byte budgets, not tokenizer counts.
+
+Supplied output has this envelope:
+
+```json
+{"schema_version":"glassgraph.assist-output.v1","packet_hash":"<packet checksum>","task":"rewrite","payload":{"query":"Suggested research query"}}
+```
+
+The supported tasks are:
+
+| Task | Payload | Validation |
+|---|---|---|
+| `rewrite` | `{"query": "..."}` | Nonempty suggestion, at most 1,024 UTF-8 bytes; never applied automatically |
+| `disambiguate` | `{"evidence_ids": ["..."]}` | Unique IDs from the packet; an empty selection is allowed |
+| `compress` | `{"extracts": [{"evidence_id": "...", "quote": "..."}]}` | Each quote occurs contiguously in its cited packet passage |
+
+Unknown fields, duplicate JSON keys, stale packets, invented IDs, and unsupported tasks are rejected.
+Accepted advice requires review. Exact quotation does not establish semantic support or relevance.
+Free-form synthesis remains disabled under [ADR-0019](docs/adr/ADR-0019-private-assist-output-replay.md).
+Issue #6 owns local runtime execution and measured model admission.
+
+Disabled assist returns the complete validated packet. Missing or invalid output falls back to that packet.
+A stale packet raises `AssistError`; stale evidence is not a valid fallback.
+The module performs no writes or network calls and labels supplied output as runtime-unattested.
+Callers must keep private packets and output local.
+
+Run the read-only synthetic replay after installation:
+
+```bash
+python prototypes/semantic_assist_replay.py
+```
+
+This demonstrates deterministic output, advisory extraction, and invalid-output fallback. It is not an inference benchmark.
+
 ## Retrieval benchmark
 
 `retrieval_benchmark_cli.py` measures GrooveSeek or QMD with the evidence-level metrics from ADR-0014. The command uses one metric implementation for the public fixture and the private benchmark.

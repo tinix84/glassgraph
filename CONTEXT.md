@@ -4,6 +4,18 @@
 
 A typed statement that connects a subject, a predicate, and an object. An assertion cites one or more evidence passages.
 
+## Advisory output
+
+An untrusted suggestion associated with a research query and supporting evidence. It requires review and does not create a canonical assertion.
+
+## Evidence packet
+
+A bounded collection of current evidence passages and a research query supplied to an optional assist operation.
+
+## Output replay
+
+Validation of previously supplied advisory output against its evidence packet. Replay does not execute a model or attest its runtime.
+
 ## Assertion candidate
 
 An evidence-linked relation proposal that has not passed the rule for canonical assertions.
