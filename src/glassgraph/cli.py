@@ -27,6 +27,6 @@ def main(argv: list[str] | None = None) -> int:
         visible = [f for f in findings if f.severity == args.severity] if args.severity else findings
         print(lint.format_report(visible))
         return lint.exit_code_from_findings(findings)
-    except (ConfigError, OSError) as error:
+    except (ConfigError, OSError, UnicodeError) as error:
         print(f"glassgraph: {error}", file=sys.stderr)
         return 2

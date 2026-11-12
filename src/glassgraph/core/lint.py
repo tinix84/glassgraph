@@ -122,7 +122,7 @@ def _build_canonical_index(wiki_root: Path, config: VaultConfig | None = None) -
             continue
         relative = page.relative_to(wiki_root).as_posix()
         prefix = config.wiki.relative_to(config.root).as_posix() if config else "wiki"
-        for key in (page.name, relative, "wiki/" + relative, prefix + "/" + relative):
+        for key in (page.name, relative, prefix + "/" + relative):
             canonical_index.setdefault(key, page.stem)
             canonical_index.setdefault(key.removesuffix(".md"), page.stem)
 
@@ -460,7 +460,7 @@ def check_relation_drift(pages: list[Path]) -> list[LintFinding]:
 
 def check_metadata_validity(wiki_root: Path, *, config: VaultConfig | None = None) -> list[LintFinding]:
     """Check metadata shapes and dates with the writer's shared validator."""
-    expected = {folder: ENTITY_TYPES.get(folder) for folder in (config.entity_dirs if config else _ENTITY_DIRS)}
+    expected = {folder: ENTITY_TYPES.get(folder.casefold()) for folder in (config.entity_dirs if config else _ENTITY_DIRS)}
     expected["sources"] = "source"
     findings = []
     for folder, page_type in expected.items():

@@ -1,5 +1,4 @@
 """Portable lint through the installed command interface."""
-from pathlib import Path
 import subprocess
 import sys
 import pytest
@@ -45,6 +44,35 @@ def test_configured_layout_and_exclusions_control_all_lint_checks(tmp_path, caps
     page.write_text(page.read_text(encoding="utf-8").replace("type: company", "type: invalid"), encoding="utf-8")
     assert main(["lint", "--root", str(tmp_path)]) == 1
     assert "metadata-validity" in capsys.readouterr().out
+
+
+def test_wrong_qualified_prefix_is_broken_for_custom_wiki(tmp_path, capsys):
+    from glassgraph.cli import main
+
+    (tmp_path / ".glassgraph").mkdir()
+    (tmp_path / ".glassgraph/config.toml").write_text('[paths]\nwiki="notes"\n', encoding="utf-8")
+    companies = tmp_path / "notes/companies"
+    companies.mkdir(parents=True)
+    (companies / "Example.md").write_text(
+        '---\ntype: company\naliases_en: [Example]\naliases: [Example]\n---\n'
+        '[[wiki/companies/Example.md]] [[notes/companies/Example.md]]\n', encoding="utf-8",
+    )
+    assert main(["lint", "--root", str(tmp_path)]) == 0
+    report = capsys.readouterr().out
+    assert "broken-wikilink" in report and "[[wiki/companies/Example.md]]" in report
+    assert "[[notes/companies/Example.md]]" not in report
+
+
+def test_invalid_utf8_returns_a_read_error_without_traceback(tmp_path, capsys):
+    from glassgraph.cli import main
+
+    companies = tmp_path / "wiki/companies"
+    companies.mkdir(parents=True)
+    (companies / "Invalid.md").write_bytes(b"\xff")
+    assert main(["--root", str(tmp_path), "lint"]) == 2
+    output = capsys.readouterr()
+    assert output.err.startswith("glassgraph:")
+    assert "Traceback" not in output.err
 
 
 def test_external_process_discovers_vault_and_filters_without_hiding_failure(tmp_path, monkeypatch):

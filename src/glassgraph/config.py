@@ -85,9 +85,9 @@ def load_config(root: str | Path | None = None, *, start: Path | None = None) ->
     dirs = paths.get("entity_dirs", list(ENTITY_TYPES))
     excludes = paths.get("exclude", [".temp"])
     if (not isinstance(dirs, list) or any(not isinstance(d, str) or not d
-            or d in {".", "..", "sources"} or "/" in d or "\\" in d or "\0" in d
+            or d.casefold() in {".", "..", "sources"} or "/" in d or "\\" in d or "\0" in d
             or PureWindowsPath(d).drive for d in dirs)
-            or len(set(dirs)) != len(dirs) or not isinstance(excludes, list)):
+            or len({d.casefold() for d in dirs}) != len(dirs) or not isinstance(excludes, list)):
         raise ConfigError("Use unique entity directory names and an exclude list")
     db = zotero.get("db")
     if db is not None and (not isinstance(db, str) or not db or "\0" in db):

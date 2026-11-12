@@ -78,7 +78,7 @@ exclude = [".temp"]
 
 These defaults preserve existing lint directory order and first-owner alias resolution.
 `sources/` is always a source directory. Additional entity directories use each page's declared type.
-Directory names must be unique single path components. `sources` is reserved.
+Directory names must be unique single path components, ignoring case. `sources` is reserved in every letter case.
 Exclusions are file or directory paths relative to the vault root, not glob patterns.
 Configured wiki, raw, and excluded paths must stay inside the vault. Scanned links that leave the vault are configuration errors.
 When the raw path is the default `raw`, lint also resolves legacy `raw-CN` citation targets.

@@ -52,6 +52,8 @@ def test_config_defaults_and_explicit_layout(tmp_path):
     '[paths]\nexclude=[123]', '[paths]\nunknown=true', '[paths]\nwiki=[',
     'paths=1', '[unknown]\nvalue=1', '[zotero]\ndb=1',
     '[paths]\nwiki="\\u0000"', '[paths]\nentity_dirs=["\\u0000"]',
+    '[paths]\nentity_dirs=["Sources"]',
+    '[paths]\nentity_dirs=["companies","COMPANIES"]',
 ])
 def test_invalid_config_is_rejected(tmp_path, document):
     from glassgraph.config import ConfigError, load_config
