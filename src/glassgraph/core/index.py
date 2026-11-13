@@ -5,6 +5,7 @@ import hashlib
 import importlib.metadata
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,11 +46,13 @@ def _parse_aliases(page: Path) -> tuple[str, list[str]]:
     Pages tagged `merged` return an empty alias list — they exist for Obsidian
     backwards-compatibility but should not appear in the Stage 1 trie.
     """
+    return _aliases_from_metadata(page, frontmatter.parse_file(page).metadata)
+
+
+def _aliases_from_metadata(page: Path, fm: dict | None) -> tuple[str, list[str]]:
     canonical = page.stem
-    p = frontmatter.parse_file(page)
-    if p.metadata is None:
+    if fm is None:
         return canonical, [canonical]
-    fm = p.metadata
     tags = fm.get("tags") or []
     if isinstance(tags, str):
         tags = [tags]
@@ -92,24 +95,42 @@ def is_stale(
     return _page_shas(wiki_root) != manifest.get("page_shas", {})
 
 
+@dataclass(frozen=True)
+class AliasOwner:
+    """Keep the page path and unvalidated declared type from one parse."""
+
+    page: Path
+    declared_type: object
+
+
+def alias_owners(
+    wiki_root: Path,
+    *,
+    config: VaultConfig | None = None,
+) -> dict[str, AliasOwner]:
+    """Return each alias and its first eligible owner in dictionary order."""
+    owners: dict[str, AliasOwner] = {}
+    for page in _pages(wiki_root, config):
+        metadata = frontmatter.parse_file(page).metadata
+        canonical, aliases = _aliases_from_metadata(page, metadata)
+        owner = AliasOwner(page, (metadata or {}).get("type"))
+        for alias in aliases:
+            if alias in owners:
+                if owners[alias].page.stem != canonical:
+                    logger.warning("alias collision: '%s' → '%s' and '%s', keeping first", alias, owners[alias].page.stem, canonical)
+                continue
+            owners[alias] = owner
+    return owners
+
+
 def compile_index(
     wiki_root: Path,
     *,
     config: VaultConfig | None = None,
 ) -> tuple[ahocorasick.Automaton, dict, dict[str, str]]:
     """Compile the alias trie and index records without writing files."""
-    alias_map: dict[str, str] = {}
-    pairs: list[tuple[str, str]] = []  # (alias, canonical)
-
-    for page in _pages(wiki_root, config):
-        canonical, aliases = _parse_aliases(page)
-        for alias in aliases:
-            if alias in alias_map:
-                if alias_map[alias] != canonical:
-                    logger.warning("alias collision: '%s' → '%s' and '%s', keeping first", alias, alias_map[alias], canonical)
-                continue
-            alias_map[alias] = canonical
-            pairs.append((alias, canonical))
+    alias_map = {alias: owner.page.stem for alias, owner in alias_owners(wiki_root, config=config).items()}
+    pairs = list(alias_map.items())
 
     # Sort longest-first (for logging consistency; dedup is done in linker.py)
     pairs.sort(key=lambda x: -len(x[0]))

@@ -52,6 +52,7 @@ The package exposes these portable commands:
 - Stage 1 extraction
 - Explanation
 - Alias suggestions
+- Alias lookup
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
@@ -175,6 +176,30 @@ Document frequencies preserve the legacy behavior. They use complete top-level M
 Configured exclusions apply to the dictionary and document-frequency corpus.
 A missing or fully excluded source directory gives an empty document-frequency corpus.
 Exit code `0` means success. Invalid input or a read error returns `2`.
+
+### Resolve a name or alias
+
+```powershell
+glassgraph --root 'D:\vault' lookup Example
+glassgraph lookup 'Example alias'
+python -m glassgraph lookup Example
+```
+
+Lookup uses shared root discovery and the current configured alias dictionary.
+It prints `canonical | type | native absolute page path` for the owning page.
+It does not read or write derived state.
+It can run without write access to the vault.
+
+Exact aliases take precedence. The fallback uses Python lowercase matching, with the legacy last-key ordering for lowercase collisions.
+Exact alias collisions retain the first eligible owner in configured directory order.
+Distinct aliases keep their actual owner paths even when different folders contain equal filenames.
+Merged and excluded pages do not contribute aliases.
+
+Default folder names infer the legacy entity types, ignoring folder-name case.
+Custom folders use the selected page's declared entity type. An unsupported or missing custom type is an error.
+Lookup takes the alias and declared type from one parse of the owner page.
+Exit codes are `0` for found and `1` for not found. Invalid configuration or a read error returns `2`.
+Lookup does not add aliases or create wiki pages.
 
 ### Run the existing linker
 

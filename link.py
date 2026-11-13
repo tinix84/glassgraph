@@ -222,19 +222,18 @@ def run_lookup(
     index_mod.build_index(wiki_root, manifest_path, aliases_path)
     alias_map = json.loads(aliases_path.read_text(encoding="utf-8"))
 
-    canonical = alias_map.get(name)
+    from glassgraph.core import lookup
+
+    canonical = lookup.resolve_alias(name, alias_map)
     if canonical is None:
-        lower = {k.lower(): v for k, v in alias_map.items()}
-        canonical = lower.get(name.lower())
-    if canonical is None:
-        print(f"NOT FOUND: '{name}' — no page or alias resolves to it")
+        print(lookup.format_not_found(name), end="")
         return 1
 
     _type_name = {"companies": "company", "technologies": "technology", "products": "product", "markets": "market", "themes": "theme"}
     for d in ("companies", "technologies", "products", "markets", "themes"):
         p = wiki_root / d / f"{canonical}.md"
         if p.exists():
-            print(f"{canonical} | {_type_name[d]} | {p}")
+            print(lookup.format_found(canonical, _type_name[d], p), end="")
             return 0
     print(f"{canonical} | (alias target, page file not located) |")
     return 0

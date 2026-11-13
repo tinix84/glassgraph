@@ -33,9 +33,17 @@ def main(argv: list[str] | None = None) -> int:
     suggest_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     suggest_parser.add_argument("source", help="Markdown source path relative to the vault root")
     suggest_parser.add_argument("--top", type=int, default=20, help="Candidate limit (default: 20)")
+    lookup_parser = commands.add_parser("lookup", help="Resolve a name or alias without writing state")
+    lookup_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    lookup_parser.add_argument("name", help="Canonical name or alias")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "lookup":
+            from glassgraph.core.lookup import lookup
+            status, report = lookup(config, args.name)
+            print(report, end="")
+            return status
         if args.command == "suggest":
             from glassgraph.extraction import suggest
             print(suggest(config, args.source, top_n=args.top), end="")
