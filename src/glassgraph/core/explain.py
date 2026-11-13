@@ -39,11 +39,10 @@ def explain_file(
     strict_disambiguation: bool = False,
 ) -> str:
     """Return formatted multi-line string explaining every Stage 1 hit in raw_path."""
-    text = raw_path.read_text(encoding="utf-8")
-    body = linker._preprocess(text)
-
-    patterns = linker._load_disambiguation(disambiguation_yaml, strict=strict_disambiguation)
-    hits, warnings = linker.extract(body, automaton, disambiguation_patterns=patterns)
+    body, hits, warnings = linker.scan_file(
+        raw_path, automaton, disambiguation_yaml,
+        strict_disambiguation=strict_disambiguation,
+    )
 
     lines: list[str] = []
     unique_canonicals: set[str] = set()

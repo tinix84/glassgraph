@@ -70,14 +70,28 @@ def _preprocess(text: str) -> str:
 # ── Aho-Corasick scan + greedy dedup ─────────────────────────────────────────
 
 def _load_disambiguation(yaml_path: Path | None, *, strict: bool = False) -> list[str]:
-    if yaml_path is None or not yaml_path.exists():
+    if yaml_path is None or (not strict and not yaml_path.exists()):
         return []
     try:
-        entries = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or []
+        text = yaml_path.read_text(encoding="utf-8")
+        if strict:
+            node = yaml.compose(text)
+            if node is None:
+                return []
+            if not isinstance(node, yaml.SequenceNode):
+                raise ConfigError("Use a disambiguation list with string patterns")
+            try:
+                entries = yaml.safe_load(text)
+            except ValueError:
+                raise ConfigError("Read a valid disambiguation YAML file") from None
+        else:
+            entries = yaml.safe_load(text) or []
         if strict and (not isinstance(entries, list) or any(
                 not isinstance(e, dict) or not isinstance(e.get("pattern"), str) for e in entries)):
             raise ConfigError("Use a disambiguation list with string patterns")
         return [e["pattern"].lower() for e in entries if isinstance(e, dict) and "pattern" in e]
+    except FileNotFoundError:
+        return []
     except (yaml.YAMLError, OSError):
         if strict:
             raise ConfigError("Read a valid disambiguation YAML file") from None
@@ -201,6 +215,21 @@ def build_result(
     )
 
 
+def scan_file(
+    raw_path: Path,
+    automaton: ahocorasick.Automaton,
+    disambiguation_yaml: Path | None = None,
+    *,
+    strict_disambiguation: bool = False,
+) -> tuple[str, list[tuple[int, int, str, str]], list[str]]:
+    """Read and preprocess one source, then return its body, hits, and warnings."""
+    text = raw_path.read_text(encoding="utf-8")
+    body = _preprocess(text)
+    patterns = _load_disambiguation(disambiguation_yaml, strict=strict_disambiguation)
+    hits, warnings = extract(body, automaton, disambiguation_patterns=patterns)
+    return body, hits, warnings
+
+
 def extract_file(
     raw_path: Path,
     automaton: ahocorasick.Automaton,
@@ -209,9 +238,9 @@ def extract_file(
     *,
     strict_disambiguation: bool = False,
 ) -> ExtractionResult:
-    """Full pipeline: read raw file → preprocess → extract → build result."""
-    text = raw_path.read_text(encoding="utf-8")
-    body = _preprocess(text)
-    patterns = _load_disambiguation(disambiguation_yaml, strict=strict_disambiguation)
-    hits, warnings = extract(body, automaton, disambiguation_patterns=patterns)
+    """Read one source and aggregate its Stage 1 matches."""
+    _, hits, warnings = scan_file(
+        raw_path, automaton, disambiguation_yaml,
+        strict_disambiguation=strict_disambiguation,
+    )
     return build_result(str(raw_path), manifest_sha, hits, warnings)

@@ -133,9 +133,9 @@ glassgraph explain raw/example.md --filter Example --context 15
 python -m glassgraph explain wiki/sources/example.md --suppressed
 ```
 
-Explanation uses the same root discovery, source scope, entity order, and exclusions as portable extraction.
+Explanation uses the same input selection and matching rules as portable extraction.
 It reads current aliases and optional `.glassgraph/index/disambiguation.yaml` rules in memory.
-It prints the existing Stage 1 report without creating or changing vault files, caches, indexes, or reports.
+It prints the existing Stage 1 report without changing the vault.
 It does not require writable derived-output paths.
 
 `--filter` selects a canonical entity. `--suppressed` also displays disambiguation warnings.

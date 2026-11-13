@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 
@@ -119,6 +120,13 @@ def test_invalid_sources_return_error_without_report(wiki_dir, tmp_path, source,
     ("raw/sample.md", b"\xff"),
     (".glassgraph/index/disambiguation.yaml", b"[invalid"),
     (".glassgraph/index/disambiguation.yaml", b"- pattern: 2"),
+    (".glassgraph/index/disambiguation.yaml", b"false"),
+    (".glassgraph/index/disambiguation.yaml", b"0"),
+    (".glassgraph/index/disambiguation.yaml", b"{}"),
+    (".glassgraph/index/disambiguation.yaml", b"''"),
+    (".glassgraph/index/disambiguation.yaml", b"null"),
+    (".glassgraph/index/disambiguation.yaml", b"~"),
+    (".glassgraph/index/disambiguation.yaml", b"- pattern: 2026-02-31"),
 ])
 def test_read_errors_return_no_partial_report(wiki_dir, tmp_path, target, content, capsys):
     source_fixture(tmp_path)
@@ -158,14 +166,62 @@ def test_empty_dictionary_reports_no_hits_without_state(tmp_path):
     assert snapshot(tmp_path) == before
 
 
-def test_legacy_formatter_keeps_lenient_rule_default(wiki_dir, tmp_path, explain_mod):
+@pytest.mark.parametrize("content", ["[invalid", "false", "0", "{}", "''"])
+def test_legacy_formatter_keeps_lenient_rule_default(wiki_dir, tmp_path, explain_mod, content):
     from glassgraph.core.index import compile_index
 
     source = source_fixture(tmp_path)
     rules = tmp_path / ".glassgraph/index/disambiguation.yaml"
-    rules.write_text("[invalid", encoding="utf-8")
+    rules.write_text(content, encoding="utf-8")
     automaton, _, _ = compile_index(wiki_dir)
     assert "[0:5]" in explain_mod.explain_file(source, automaton, disambiguation_yaml=rules)
+
+
+@pytest.mark.parametrize("content", ["", "# no rules\n", "[]"])
+def test_empty_rules_remain_valid(wiki_dir, tmp_path, content):
+    source = source_fixture(tmp_path)
+    rules = tmp_path / ".glassgraph/index/disambiguation.yaml"
+    rules.write_text(content, encoding="utf-8")
+    before = snapshot(tmp_path)
+    assert "[0:5]" in explain(load_config(tmp_path), source)
+    assert snapshot(tmp_path) == before
+
+
+def test_unreadable_entity_directory_is_a_read_error(wiki_dir, tmp_path, monkeypatch, capsys):
+    source_fixture(tmp_path)
+    before = snapshot(tmp_path)
+    original = os.scandir
+
+    def denied(path):
+        if Path(path) == wiki_dir / "companies":
+            raise PermissionError("Cannot read the entity directory")
+        return original(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", denied)
+        assert main(["--root", str(tmp_path), "explain", "raw/sample.md"]) == 2
+    output = capsys.readouterr()
+    assert output.out == "" and output.err.startswith("glassgraph:")
+    assert snapshot(tmp_path) == before
+
+
+def test_unreadable_optional_rules_are_a_read_error(wiki_dir, tmp_path, monkeypatch, capsys):
+    source_fixture(tmp_path)
+    before = snapshot(tmp_path)
+    rules = tmp_path / ".glassgraph/index/disambiguation.yaml"
+    original = Path.open
+
+    def denied(path, *args, **kwargs):
+        if path == rules:
+            raise PermissionError("Cannot read the rule file")
+        return original(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", denied)
+        assert main(["--root", str(tmp_path), "explain", "raw/sample.md"]) == 2
+    output = capsys.readouterr()
+    assert output.out == "" and output.err.startswith("glassgraph:")
+    assert snapshot(tmp_path) == before
 
 
 @pytest.mark.parametrize("location", ["source", "entity", "rules"])
@@ -200,8 +256,8 @@ def test_installed_command_outside_checkout(wiki_dir, tmp_path, mode, entry):
     if entry == "module":
         command = [sys.executable, "-I", "-B", "-m", "glassgraph"]
     else:
-        executable = "Scripts/glassgraph.exe" if os.name == "nt" else "glassgraph"
-        command = [str(Path(sys.executable).parent / executable)]
+        executable = "glassgraph.exe" if os.name == "nt" else "glassgraph"
+        command = [str(Path(sysconfig.get_path("scripts")) / executable)]
     command += ["explain", "raw/sample.md", "--suppressed", "--context", "5"]
     if mode == "flag":
         command += ["--root", str(tmp_path)]
@@ -216,9 +272,14 @@ def test_installed_command_outside_checkout(wiki_dir, tmp_path, mode, entry):
 @pytest.mark.parametrize("installed", [True, False])
 def test_legacy_file_import_outside_checkout(tmp_path, installed):
     script = """
-import importlib.util, sys, sysconfig
+import importlib.abc, importlib.util, sys, sysconfig
 if sys.argv[2] == 'source':
     sys.path.append(sysconfig.get_path('purelib'))
+    class BlockInstalledPackage(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == 'glassgraph':
+                raise ModuleNotFoundError('Require the checkout bootstrap', name='glassgraph')
+    sys.meta_path.insert(0, BlockInstalledPackage())
 spec = importlib.util.spec_from_file_location('legacy_explain', sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
@@ -226,6 +287,10 @@ spec.loader.exec_module(module)
 from glassgraph.core import explain
 assert module.explain_file is explain.explain_file
 assert module.format_hit('Tesla', 0, 4, 'Tesla', 'Tesla').startswith('[0:5]')
+if sys.argv[2] == 'source':
+    from pathlib import Path
+    assert '_glassgraph_explain_bootstrap' in sys.modules
+    assert Path(explain.__file__).resolve() == Path(sys.argv[1]).resolve().parent / 'src/glassgraph/core/explain.py'
 """
     arguments = [sys.executable, "-I", "-B"] + ([] if installed else ["-S"])
     shim = Path(__file__).resolve().parents[1] / "explain.py"
