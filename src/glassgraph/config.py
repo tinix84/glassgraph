@@ -5,6 +5,7 @@ import os
 from pathlib import Path, PureWindowsPath
 from dataclasses import dataclass
 from collections.abc import Iterator
+from stat import S_ISREG
 
 try:
     import tomllib
@@ -66,7 +67,7 @@ class VaultConfig:
         except FileNotFoundError:
             return
         for page in pages:
-            if self.allows(page):
+            if self.allows(page) and S_ISREG(page.stat().st_mode):
                 yield page
 
     def allows(self, path: Path) -> bool:
@@ -86,7 +87,11 @@ def load_config(root: str | Path | None = None, *, start: Path | None = None) ->
     if not config_path.resolve().is_relative_to(root):
         raise ConfigError("Keep the configuration file inside the vault")
     try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        try:
+            text = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = ""
+        data = tomllib.loads(text)
     except (OSError, UnicodeError, ValueError):
         raise ConfigError("Read a valid .glassgraph/config.toml file") from None
     paths = data.get("paths", {})

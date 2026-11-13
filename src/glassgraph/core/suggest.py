@@ -13,7 +13,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from glassgraph.config import VaultConfig
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from glassgraph.config import VaultConfig
 
 # CJK noun candidate: 2-5 CJK chars
 _CJK_RE = re.compile(r"[一-鿿]{2,5}")
@@ -72,7 +75,7 @@ def extract_candidates(body: str) -> list[str]:
 def compute_df_index(sources_dir: Path, *, config: VaultConfig | None = None) -> dict[str, int]:
     """Document-frequency index: token → number of source pages containing it.
 
-    O(N_sources * candidates_per_source). Cache to disk when used by CLI.
+    O(N_sources * candidates_per_source). Only the legacy cache caller persists this result.
     """
     df: Counter = Counter()
     if config is None and not sources_dir.exists():

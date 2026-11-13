@@ -92,6 +92,17 @@ def test_df_semantics_include_headers_and_fences_but_not_nested_files(wiki_dir, 
     assert df.get("Nova Switch", 0) == 0
 
 
+def test_directories_named_markdown_are_not_files(wiki_dir, tmp_path):
+    source_fixture(tmp_path)
+    for folder in ("sources", "companies"):
+        nested = wiki_dir / folder / "notes.md"
+        nested.mkdir()
+        (nested / "Nested.md").write_text("Nova Switch", encoding="utf-8")
+    before = snapshot(tmp_path)
+    assert suggest(load_config(tmp_path), "raw/sample.md") == (FIXTURE / "default.txt").read_text(encoding="utf-8")
+    assert snapshot(tmp_path) == before
+
+
 def test_source_removal_uses_separate_before_after_fixtures(tmp_path):
     for name, filenames in (("before", ["A.md", "B.md"]), ("after", ["A.md"])):
         directory = tmp_path / name / "wiki/sources"
@@ -170,7 +181,7 @@ def test_invalid_utf8_produces_no_report(wiki_dir, tmp_path, target, capsys):
     assert snapshot(tmp_path) == before
 
 
-@pytest.mark.parametrize("target", ["directory", "file"])
+@pytest.mark.parametrize("target", ["directory", "file", "stat"])
 def test_unreadable_corpus_fails_without_partial_report(wiki_dir, tmp_path, target, monkeypatch, capsys):
     source_fixture(tmp_path)
     before = snapshot(tmp_path)
@@ -183,7 +194,7 @@ def test_unreadable_corpus_fails_without_partial_report(wiki_dir, tmp_path, targ
             return original(path)
 
         attribute = "iterdir"
-    else:
+    elif target == "file":
         original = Path.open
 
         def denied(path, *args, **kwargs):
@@ -192,8 +203,45 @@ def test_unreadable_corpus_fails_without_partial_report(wiki_dir, tmp_path, targ
             return original(path, *args, **kwargs)
 
         attribute = "open"
+    else:
+        original = Path.stat
+
+        def denied(path, *args, **kwargs):
+            if path == wiki_dir / "sources/A.md":
+                raise PermissionError("Cannot inspect a source page")
+            return original(path, *args, **kwargs)
+
+        attribute = "stat"
     with monkeypatch.context() as patch:
         patch.setattr(Path, attribute, denied)
+        assert main(["--root", str(tmp_path), "suggest", "raw/sample.md"]) == 2
+    output = capsys.readouterr()
+    assert output.out == "" and output.err.startswith("glassgraph:")
+    assert snapshot(tmp_path) == before
+
+
+def test_unreadable_config_cannot_fall_back_to_defaults(wiki_dir, tmp_path, monkeypatch, capsys):
+    source_fixture(tmp_path)
+    config_file = tmp_path / ".glassgraph/config.toml"
+    config_file.parent.mkdir()
+    config_file.write_text("", encoding="utf-8")
+    before = snapshot(tmp_path)
+    original_stat = Path.stat
+    original_open = Path.open
+
+    def denied_stat(path, *args, **kwargs):
+        if path == config_file:
+            raise PermissionError("Cannot inspect configuration")
+        return original_stat(path, *args, **kwargs)
+
+    def denied_open(path, *args, **kwargs):
+        if path == config_file:
+            raise PermissionError("Cannot read configuration")
+        return original_open(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", denied_stat)
+        patch.setattr(Path, "open", denied_open)
         assert main(["--root", str(tmp_path), "suggest", "raw/sample.md"]) == 2
     output = capsys.readouterr()
     assert output.out == "" and output.err.startswith("glassgraph:")
@@ -285,9 +333,8 @@ def test_installed_command_outside_checkout(wiki_dir, tmp_path, mode, entry):
 @pytest.mark.parametrize("installed", [True, False])
 def test_legacy_import_outside_checkout(tmp_path, installed):
     script = """
-import importlib.abc, importlib.util, sys, sysconfig
+import importlib.abc, importlib.util, sys
 if sys.argv[2] == 'source':
-    sys.path.append(sysconfig.get_path('purelib'))
     class BlockInstalledPackage(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
             if fullname == 'glassgraph':
@@ -302,8 +349,8 @@ assert module.compute_df_index is suggest.compute_df_index
 assert module.load_or_build_df is suggest.load_or_build_df
 if sys.argv[2] == 'source':
     from pathlib import Path
-    assert '_glassgraph_suggest_bootstrap' in sys.modules
     assert Path(suggest.__file__).resolve() == Path(sys.argv[1]).resolve().parent / 'src/glassgraph/core/suggest.py'
+    assert 'yaml' not in sys.modules and 'glassgraph.config' not in sys.modules
 """
     arguments = [sys.executable, "-I", "-B"] + ([] if installed else ["-S"])
     shim = Path(__file__).resolve().parents[1] / "suggest.py"

@@ -9,11 +9,13 @@ except ModuleNotFoundError as error:
     if error.name != "glassgraph":
         raise
     # Bootstrap package code without changing the caller's import path.
+    _package = Path(__file__).resolve().parent / "src" / "glassgraph"
     _spec = importlib.util.spec_from_file_location(
-        "_glassgraph_suggest_bootstrap", Path(__file__).resolve().with_name("frontmatter.py"),
+        "glassgraph", _package / "__init__.py",
+        submodule_search_locations=[str(_package)],
     )
     _module = importlib.util.module_from_spec(_spec)
-    sys.modules[_spec.name] = _module
+    sys.modules["glassgraph"] = _module
     _spec.loader.exec_module(_module)
     from glassgraph.core import suggest as _implementation
 
