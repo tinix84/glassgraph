@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 
@@ -155,7 +156,9 @@ def test_redirected_input_and_output_rejected(wiki_dir, tmp_path, location, caps
     assert list(external.iterdir()) == [outside_file]
 
 
-@pytest.mark.parametrize("content", ["- pattern: [bad]\n", "[invalid", "wrong: mapping"])
+@pytest.mark.parametrize("content", ["- pattern: [bad]\n", "[invalid", "wrong: mapping", "false", "0", "{}", "''",
+                                     "null", "~", "- pattern: 2026-02-31", "- pattern: !!bool maybe",
+                                     "- pattern: !!timestamp wrong", "- pattern: !!int ''"])
 def test_bad_rules_fail_without_state_writes(wiki_dir, tmp_path, content, capsys):
     make_source(tmp_path)
     rules = tmp_path / ".glassgraph/index/disambiguation.yaml"
@@ -178,8 +181,8 @@ def test_installed_command_outside_checkout(wiki_dir, tmp_path, root_mode, entry
     env.pop("GLASSGRAPH_ROOT", None)
     env.pop("PYTHONPATH", None)
     command = ([sys.executable, "-I", "-B", "-m", "glassgraph"] if entry == "module"
-               else [str(Path(sys.executable).parent / "Scripts/glassgraph.exe")]
-               if os.name == "nt" else [str(Path(sys.executable).parent / "glassgraph")])
+               else [str(Path(sysconfig.get_path("scripts")) /
+                         ("glassgraph.exe" if os.name == "nt" else "glassgraph"))])
     command += ["extract", "raw/sample.md", "--dry-run"]
     if root_mode == "flag":
         command += ["--root", str(tmp_path)]

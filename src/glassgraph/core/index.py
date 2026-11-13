@@ -26,7 +26,14 @@ def _pages(wiki_root: Path, config: VaultConfig | None = None):
         directory = wiki_root / name
         if config and not config.allows(directory):
             continue
-        for page in sorted(directory.glob("*.md")):
+        if config:
+            try:
+                pages = sorted(page for page in directory.iterdir() if page.match("*.md"))
+            except FileNotFoundError:
+                continue
+        else:
+            pages = sorted(directory.glob("*.md"))
+        for page in pages:
             if config is None or config.allows(page):
                 yield page
 

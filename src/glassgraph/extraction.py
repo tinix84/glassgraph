@@ -30,8 +30,8 @@ def _check_output(config: VaultConfig, path: Path, *, directory: bool = False) -
         raise ConfigError("Use derived output files without hard links")
 
 
-def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -> dict:
-    """Read one source and return legacy-compatible Stage 1 result fields."""
+def resolve_source(config: VaultConfig, source: str | Path) -> Path:
+    """Resolve a current Markdown source inside the configured input scope."""
     if "\0" in os.fspath(source):
         raise ConfigError("Select a source path without null characters")
     source = Path(source)
@@ -45,6 +45,43 @@ def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -
         raise ConfigError("Select an existing Markdown source in raw or wiki/sources")
     if not config.wiki.is_dir():
         raise ConfigError("Select an existing configured wiki directory")
+    return selected
+
+
+def disambiguation_path(config: VaultConfig) -> Path:
+    """Locate optional portable disambiguation rules without creating state."""
+    path = config.root / ".glassgraph/index/disambiguation.yaml"
+    if not config.allows(path):
+        raise ConfigError("Select disambiguation rules outside excluded directories")
+    return path
+
+
+def explain(
+    config: VaultConfig,
+    source: str | Path,
+    *,
+    filter_canonical: str | None = None,
+    show_suppressed: bool = False,
+    context_chars: int = 30,
+) -> str:
+    """Explain current Stage 1 matches without writing derived state."""
+    from glassgraph.core import explain as formatter
+
+    if context_chars < 0:
+        raise ConfigError("Use a nonnegative context length")
+    selected = resolve_source(config, source)
+    rules = disambiguation_path(config)
+    automaton, _, _ = index.compile_index(config.wiki, config=config)
+    return formatter.explain_file(
+        selected, automaton, filter_canonical=filter_canonical,
+        show_suppressed=show_suppressed, context_chars=context_chars,
+        disambiguation_yaml=rules, strict_disambiguation=True,
+    )
+
+
+def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -> dict:
+    """Read one source and return legacy-compatible Stage 1 result fields."""
+    selected = resolve_source(config, source)
 
     index_dir = config.root / ".glassgraph/index"
     cache_dir = config.root / ".glassgraph/cache/extraction"
@@ -56,9 +93,7 @@ def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -
         _check_output(config, target, directory=True)
     for target in (manifest_path, aliases_path, cache):
         _check_output(config, target)
-    disambiguation = index_dir / "disambiguation.yaml"
-    if not config.allows(disambiguation):
-        raise ConfigError("Select disambiguation rules outside excluded directories")
+    disambiguation = disambiguation_path(config)
 
     automaton, manifest, aliases = index.compile_index(config.wiki, config=config)
     # Match the legacy text writer's platform newlines before computing its SHA.

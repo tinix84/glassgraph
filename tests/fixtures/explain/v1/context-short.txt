@@ -1,0 +1,10 @@
+[12:15]   '特斯拉' → Tesla  via '特斯拉'
+            context: ...oil. 特斯拉 uses...
+[21:31]   'SiC MOSFET' → SiC-MOSFET  via 'SiC MOSFET'
+            context: ...uses SiC MOSFET. BYD...
+[33:36]   'BYD' → BYD  via 'BYD'
+            context: ...FET. BYD and ...
+[41:45]   'TSLA' → Tesla  via 'TSLA'
+            context: ... and TSLA.
+
+Summary: 4 hits, 3 unique canonicals, 1 disambiguation warnings

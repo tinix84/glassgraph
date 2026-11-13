@@ -1,74 +1,24 @@
-"""Span-level debugging output for Stage 1 entity extraction.
-
-Reuses `linker.extract()` and `linker._preprocess()` to produce a human-readable
-listing of every hit (and optionally suppressed candidates) with surrounding
-context. Intended for answering 'why did this match?' / 'why didn't this match?'
-without modifying the production pipeline.
-"""
-from __future__ import annotations
-
+"""Compatibility import for the packaged Stage 1 explanation authority."""
+import sys
 import importlib.util
 from pathlib import Path
 
-import ahocorasick
-
-
-def _import_linker():
-    import sys
-    if "linker" in sys.modules:
-        return sys.modules["linker"]
-    here = Path(__file__).resolve().parent
-    spec = importlib.util.spec_from_file_location("linker", here / "linker.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["linker"] = mod  # register before exec so dataclasses resolve correctly
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def format_hit(body: str, start: int, end: int, canonical: str, alias: str, context_chars: int = 30) -> str:
-    """Format one hit line + a context line (body[start - N : end + N + 1] with ellipsis markers)."""
-    matched = body[start:end + 1]
-    ctx_start = max(0, start - context_chars)
-    ctx_end = min(len(body), end + 1 + context_chars)
-    ctx = body[ctx_start:ctx_end].replace("\n", " ")
-    leading = "..." if ctx_start > 0 else ""
-    trailing = "..." if ctx_end < len(body) else ""
-    return (
-        f"[{start}:{end + 1}]   {matched!r} → {canonical}  via {alias!r}\n"
-        f"            context: {leading}{ctx}{trailing}"
+try:
+    from glassgraph.core import explain as _implementation
+except ModuleNotFoundError as error:
+    if error.name != "glassgraph":
+        raise
+    # Bootstrap package code without changing the caller's import path.
+    _spec = importlib.util.spec_from_file_location(
+        "_glassgraph_explain_bootstrap", Path(__file__).resolve().with_name("frontmatter.py"),
     )
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules[_spec.name] = _module
+    _spec.loader.exec_module(_module)
+    from glassgraph.core import explain as _implementation
+
+sys.modules[__name__] = _implementation
 
 
-def explain_file(
-    raw_path: Path,
-    automaton: ahocorasick.Automaton,
-    filter_canonical: str | None = None,
-    show_suppressed: bool = False,
-    context_chars: int = 30,
-    disambiguation_yaml: Path | None = None,
-) -> str:
-    """Return formatted multi-line string explaining every Stage 1 hit in raw_path."""
-    linker = _import_linker()
-    text = raw_path.read_text(encoding="utf-8")
-    body = linker._preprocess(text)
-
-    patterns = linker._load_disambiguation(disambiguation_yaml)
-    hits, warnings = linker.extract(body, automaton, disambiguation_patterns=patterns)
-
-    lines: list[str] = []
-    unique_canonicals: set[str] = set()
-    for start, end, canonical, alias in hits:
-        if filter_canonical and canonical != filter_canonical:
-            continue
-        unique_canonicals.add(canonical)
-        lines.append(format_hit(body, start, end, canonical, alias, context_chars))
-
-    if show_suppressed and warnings:
-        lines.append("")
-        lines.append("=== SUPPRESSED (disambiguation) ===")
-        for w in warnings:
-            lines.append(f"  {w}")
-
-    lines.append("")
-    lines.append(f"Summary: {len(hits)} hits, {len(unique_canonicals)} unique canonicals, {len(warnings)} disambiguation warnings")
-    return "\n".join(lines) + "\n"
+def __getattr__(name):
+    return getattr(_implementation, name)

@@ -46,7 +46,7 @@ errors, warnings = validate_meta(page.metadata, "company")
 The package supplies parsing, structural validation, and writer policy.
 The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
 Existing scripts retain their commands and dependencies below.
-The package exposes portable lint and Stage 1 extraction. Other scripts retain their entry points during incremental migration.
+The package exposes portable lint, Stage 1 extraction, and explanation. Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
 
 ### Run portable lint
@@ -124,6 +124,28 @@ Exit codes are `0` for success and `2` for configuration or read errors.
 Derived paths must remain inside the vault, outside canonical input directories, and free of redirected output links.
 Canonical Markdown and legacy `.tools` state remain unchanged.
 Stage 2 and backfill continue through the legacy commands below.
+
+### Explain Stage 1 matches
+
+```powershell
+glassgraph --root 'D:\vault' explain raw/example.md
+glassgraph explain raw/example.md --filter Example --context 15
+python -m glassgraph explain wiki/sources/example.md --suppressed
+```
+
+Explanation uses the same input selection and matching rules as portable extraction.
+It reads current aliases and optional `.glassgraph/index/disambiguation.yaml` rules in memory.
+It prints the existing Stage 1 report without changing the vault.
+It does not require writable derived-output paths.
+
+`--filter` selects a canonical entity. `--suppressed` also displays disambiguation warnings.
+`--context` selects surrounding characters per side. Its default is 30, and zero is valid.
+Negative context lengths are errors.
+Displayed spans use an exclusive end offset in the preprocessed body after frontmatter and fenced-code removal.
+They are debugging coordinates, not original-file evidence locators.
+The legacy summary counts all accepted hits and warnings, while its unique-canonical count follows the filter.
+Suppression warnings retain their legacy behavior and do not follow the canonical filter.
+Exit codes are `0` for success and `2` for invalid configuration, options, or read errors.
 
 ### Run the existing linker
 
