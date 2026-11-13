@@ -1,0 +1,44 @@
+[
+  {
+    "token": "新型器件",
+    "tf": 2,
+    "df": 1,
+    "score": 1.0
+  },
+  {
+    "token": "Nova",
+    "tf": 2,
+    "df": 1,
+    "score": 1.0
+  },
+  {
+    "token": "Nova Switch",
+    "tf": 2,
+    "df": 1,
+    "score": 1.0
+  },
+  {
+    "token": "Switch",
+    "tf": 2,
+    "df": 1,
+    "score": 1.0
+  },
+  {
+    "token": "Cobalt",
+    "tf": 1,
+    "df": 2,
+    "score": 0.3333333333333333
+  },
+  {
+    "token": "Cobalt Motor",
+    "tf": 1,
+    "df": 2,
+    "score": 0.3333333333333333
+  },
+  {
+    "token": "Motor",
+    "tf": 1,
+    "df": 2,
+    "score": 0.3333333333333333
+  }
+]

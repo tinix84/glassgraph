@@ -1,0 +1,9 @@
+=== Alias candidates ===
+
+  tf=2    df=1    score=1.00  '新型器件'
+  tf=2    df=1    score=1.00  'Nova'
+  tf=2    df=1    score=1.00  'Nova Switch'
+  tf=2    df=1    score=1.00  'Switch'
+  tf=1    df=2    score=0.33  'Cobalt'
+  tf=1    df=2    score=0.33  'Cobalt Motor'
+  tf=1    df=2    score=0.33  'Motor'

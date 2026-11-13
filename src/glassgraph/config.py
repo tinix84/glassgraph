@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from pathlib import Path, PureWindowsPath
 from dataclasses import dataclass
+from collections.abc import Iterator
+from stat import S_ISREG
 
 try:
     import tomllib
@@ -56,6 +58,18 @@ class VaultConfig:
     exclude: tuple[Path, ...]
     zotero_db: Path | None
 
+    def markdown_files(self, directory: Path) -> Iterator[Path]:
+        """Scan one configured directory without hiding read failures."""
+        if not self.allows(directory):
+            return
+        try:
+            pages = sorted(page for page in directory.iterdir() if page.match("*.md"))
+        except FileNotFoundError:
+            return
+        for page in pages:
+            if self.allows(page) and S_ISREG(page.stat().st_mode):
+                yield page
+
     def allows(self, path: Path) -> bool:
         """Exclude configured paths and reject scanned files outside the vault."""
         if any(path.is_relative_to(excluded) for excluded in self.exclude):
@@ -73,7 +87,11 @@ def load_config(root: str | Path | None = None, *, start: Path | None = None) ->
     if not config_path.resolve().is_relative_to(root):
         raise ConfigError("Keep the configuration file inside the vault")
     try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        try:
+            text = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = ""
+        data = tomllib.loads(text)
     except (OSError, UnicodeError, ValueError):
         raise ConfigError("Read a valid .glassgraph/config.toml file") from None
     paths = data.get("paths", {})

@@ -24,18 +24,10 @@ def _sha256(path: Path) -> str:
 def _pages(wiki_root: Path, config: VaultConfig | None = None):
     for name in config.entity_dirs if config else ENTITY_DIRS:
         directory = wiki_root / name
-        if config and not config.allows(directory):
-            continue
         if config:
-            try:
-                pages = sorted(page for page in directory.iterdir() if page.match("*.md"))
-            except FileNotFoundError:
-                continue
+            yield from config.markdown_files(directory)
         else:
-            pages = sorted(directory.glob("*.md"))
-        for page in pages:
-            if config is None or config.allows(page):
-                yield page
+            yield from sorted(directory.glob("*.md"))
 
 
 def _page_shas(wiki_root: Path, config: VaultConfig | None = None) -> dict[str, str]:
