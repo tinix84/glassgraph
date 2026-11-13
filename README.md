@@ -46,7 +46,7 @@ errors, warnings = validate_meta(page.metadata, "company")
 The package supplies parsing, structural validation, and writer policy.
 The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
 Existing scripts retain their commands and dependencies below.
-The package exposes the portable lint command below. Other scripts retain their existing entry points during incremental migration.
+The package exposes portable lint and Stage 1 extraction. Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
 
 ### Run portable lint
@@ -92,6 +92,38 @@ Exit codes are `0` for no critical findings, `1` for critical findings, and `2` 
 The severity filter changes displayed findings only. It cannot hide a failing exit code.
 The legacy `lint.py` import delegates to the same implementation.
 The remaining commands and state migration are covered by [issue #4](https://github.com/tinix84/glassgraph/issues/4).
+
+### Run portable Stage 1 extraction
+
+```powershell
+glassgraph --root 'D:\vault' extract raw/example.md
+glassgraph extract raw/example.md --dry-run
+python -m glassgraph extract wiki/sources/example.md
+```
+
+Extraction uses the same root discovery and configuration as lint.
+Relative source paths start at the vault root, including when the current directory is nested.
+Sources must be Markdown files inside configured raw or wiki/sources directories.
+Configured entity directory order and exclusions apply to the alias dictionary.
+Candidates require review before wiki changes.
+
+The command prints result JSON. Normal execution also writes these derived files:
+
+- `.glassgraph/index/manifest.json` and `.glassgraph/index/aliases.json`
+- `.glassgraph/cache/extraction/<vault-relative-source-path>.json`, replacing the `.md` extension
+
+For example, `raw/folder/example.md` uses `.glassgraph/cache/extraction/raw/folder/example.json`.
+Different source folders retain separate cache files.
+Optional disambiguation rules use `.glassgraph/index/disambiguation.yaml`, with the existing list-of-patterns format.
+The command does not copy legacy rules or migrate legacy state.
+
+Each run reads current source text, aliases, and disambiguation rules.
+`--dry-run` prints JSON without writing files or creating directories.
+Result fields match legacy Stage 1 output. Runtime timestamps vary between runs.
+Exit codes are `0` for success and `2` for configuration or read errors.
+Derived paths must remain inside the vault, outside canonical input directories, and free of redirected output links.
+Canonical Markdown and legacy `.tools` state remain unchanged.
+Stage 2 and backfill continue through the legacy commands below.
 
 ### Run the existing linker
 

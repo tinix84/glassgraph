@@ -7,7 +7,7 @@ name = "glassgraph"
 version = "0.1.0"
 description = "Deterministic Markdown evidence tooling"
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6", "tomli>=2; python_version < '3.11'"]
+dependencies = ["PyYAML>=6", "pyahocorasick>=2", "tomli>=2; python_version < '3.11'"]
 
 [project.scripts]
 glassgraph = "glassgraph.cli:main"

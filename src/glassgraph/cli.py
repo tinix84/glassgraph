@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from glassgraph.config import ConfigError, load_config
@@ -18,9 +19,17 @@ def main(argv: list[str] | None = None) -> int:
     lint_parser = commands.add_parser("lint", help="Read-only deterministic wiki lint")
     lint_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     lint_parser.add_argument("--severity", choices=["CRITICAL", "WARN", "INFO"])
+    extract_parser = commands.add_parser("extract", help="Extract Stage 1 entity candidates")
+    extract_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    extract_parser.add_argument("source", help="Markdown source path relative to the vault root")
+    extract_parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing derived state")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "extract":
+            from glassgraph.extraction import extract
+            print(json.dumps(extract(config, args.source, dry_run=args.dry_run), indent=2, ensure_ascii=False))
+            return 0
         if not config.wiki.is_dir():
             raise ConfigError("Select an existing configured wiki directory")
         findings = lint.run_lint(config.wiki, config=config)
