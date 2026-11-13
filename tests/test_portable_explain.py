@@ -127,6 +127,9 @@ def test_invalid_sources_return_error_without_report(wiki_dir, tmp_path, source,
     (".glassgraph/index/disambiguation.yaml", b"null"),
     (".glassgraph/index/disambiguation.yaml", b"~"),
     (".glassgraph/index/disambiguation.yaml", b"- pattern: 2026-02-31"),
+    (".glassgraph/index/disambiguation.yaml", b"- pattern: !!bool maybe"),
+    (".glassgraph/index/disambiguation.yaml", b"- pattern: !!timestamp wrong"),
+    (".glassgraph/index/disambiguation.yaml", b"- pattern: !!int ''"),
 ])
 def test_read_errors_return_no_partial_report(wiki_dir, tmp_path, target, content, capsys):
     source_fixture(tmp_path)
@@ -190,7 +193,7 @@ def test_empty_rules_remain_valid(wiki_dir, tmp_path, content):
 def test_unreadable_entity_directory_is_a_read_error(wiki_dir, tmp_path, monkeypatch, capsys):
     source_fixture(tmp_path)
     before = snapshot(tmp_path)
-    original = os.scandir
+    original = Path.iterdir
 
     def denied(path):
         if Path(path) == wiki_dir / "companies":
@@ -198,7 +201,7 @@ def test_unreadable_entity_directory_is_a_read_error(wiki_dir, tmp_path, monkeyp
         return original(path)
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "scandir", denied)
+        patch.setattr(Path, "iterdir", denied)
         assert main(["--root", str(tmp_path), "explain", "raw/sample.md"]) == 2
     output = capsys.readouterr()
     assert output.out == "" and output.err.startswith("glassgraph:")

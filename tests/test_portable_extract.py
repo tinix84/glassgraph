@@ -157,7 +157,8 @@ def test_redirected_input_and_output_rejected(wiki_dir, tmp_path, location, caps
 
 
 @pytest.mark.parametrize("content", ["- pattern: [bad]\n", "[invalid", "wrong: mapping", "false", "0", "{}", "''",
-                                     "null", "~", "- pattern: 2026-02-31"])
+                                     "null", "~", "- pattern: 2026-02-31", "- pattern: !!bool maybe",
+                                     "- pattern: !!timestamp wrong", "- pattern: !!int ''"])
 def test_bad_rules_fail_without_state_writes(wiki_dir, tmp_path, content, capsys):
     make_source(tmp_path)
     rules = tmp_path / ".glassgraph/index/disambiguation.yaml"

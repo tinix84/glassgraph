@@ -82,7 +82,8 @@ def _load_disambiguation(yaml_path: Path | None, *, strict: bool = False) -> lis
                 raise ConfigError("Use a disambiguation list with string patterns")
             try:
                 entries = yaml.safe_load(text)
-            except ValueError:
+            except Exception:
+                # PyYAML constructors can raise non-YAML errors for malformed explicit tags.
                 raise ConfigError("Read a valid disambiguation YAML file") from None
         else:
             entries = yaml.safe_load(text) or []
