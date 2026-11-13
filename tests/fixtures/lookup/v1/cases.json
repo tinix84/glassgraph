@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Tesla",
+    "exit_code": 0,
+    "stdout": "Tesla | company | {PAGE}\n",
+    "page": "companies/Tesla.md"
+  },
+  {
+    "name": "TSLA",
+    "exit_code": 0,
+    "stdout": "Tesla | company | {PAGE}\n",
+    "page": "companies/Tesla.md"
+  },
+  {
+    "name": "特斯拉",
+    "exit_code": 0,
+    "stdout": "Tesla | company | {PAGE}\n",
+    "page": "companies/Tesla.md"
+  },
+  {
+    "name": "tesla",
+    "exit_code": 0,
+    "stdout": "Tesla | company | {PAGE}\n",
+    "page": "companies/Tesla.md"
+  },
+  {
+    "name": "NonexistentCorp",
+    "exit_code": 1,
+    "stdout": "NOT FOUND: 'NonexistentCorp' — no page or alias resolves to it\n",
+    "page": null
+  }
+]

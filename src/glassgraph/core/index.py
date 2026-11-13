@@ -92,24 +92,32 @@ def is_stale(
     return _page_shas(wiki_root) != manifest.get("page_shas", {})
 
 
+def alias_pages(
+    wiki_root: Path,
+    *,
+    config: VaultConfig | None = None,
+) -> dict[str, Path]:
+    """Return each alias and its first eligible owner in dictionary order."""
+    owners: dict[str, Path] = {}
+    for page in _pages(wiki_root, config):
+        canonical, aliases = _parse_aliases(page)
+        for alias in aliases:
+            if alias in owners:
+                if owners[alias].stem != canonical:
+                    logger.warning("alias collision: '%s' → '%s' and '%s', keeping first", alias, owners[alias].stem, canonical)
+                continue
+            owners[alias] = page
+    return owners
+
+
 def compile_index(
     wiki_root: Path,
     *,
     config: VaultConfig | None = None,
 ) -> tuple[ahocorasick.Automaton, dict, dict[str, str]]:
     """Compile the alias trie and index records without writing files."""
-    alias_map: dict[str, str] = {}
-    pairs: list[tuple[str, str]] = []  # (alias, canonical)
-
-    for page in _pages(wiki_root, config):
-        canonical, aliases = _parse_aliases(page)
-        for alias in aliases:
-            if alias in alias_map:
-                if alias_map[alias] != canonical:
-                    logger.warning("alias collision: '%s' → '%s' and '%s', keeping first", alias, alias_map[alias], canonical)
-                continue
-            alias_map[alias] = canonical
-            pairs.append((alias, canonical))
+    alias_map = {alias: page.stem for alias, page in alias_pages(wiki_root, config=config).items()}
+    pairs = list(alias_map.items())
 
     # Sort longest-first (for logging consistency; dedup is done in linker.py)
     pairs.sort(key=lambda x: -len(x[0]))
