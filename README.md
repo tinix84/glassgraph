@@ -110,9 +110,9 @@ Candidates require review before wiki changes.
 The command prints result JSON. Normal execution also writes these derived files:
 
 - `.glassgraph/index/manifest.json` and `.glassgraph/index/aliases.json`
-- `.glassgraph/cache/extraction/<vault-relative-source-path>.json`, replacing the `.md` extension
+- `.glassgraph/cache/extraction/<vault-relative-source-path>.json`, retaining the complete source filename
 
-For example, `raw/folder/example.md` uses `.glassgraph/cache/extraction/raw/folder/example.json`.
+For example, `raw/folder/example.md` uses `.glassgraph/cache/extraction/raw/folder/example.md.json`.
 Different source folders retain separate cache files.
 Optional disambiguation rules use `.glassgraph/index/disambiguation.yaml`, with the existing list-of-patterns format.
 The command does not copy legacy rules or migrate legacy state.

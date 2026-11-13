@@ -44,7 +44,7 @@ def test_parity_and_dry_run(wiki_dir, tmp_path, index_mod, linker_mod, capsys):
     assert snapshot(tmp_path) == before
     data = extract(load_config(tmp_path), "raw/sample.md")
     assert (tmp_path / ".glassgraph/index/aliases.json").read_bytes() == (legacy / "aliases.json").read_bytes()
-    assert json.loads((tmp_path / ".glassgraph/cache/extraction/raw/sample.json").read_text(encoding="utf-8")) == data
+    assert json.loads((tmp_path / ".glassgraph/cache/extraction/raw/sample.md.json").read_text(encoding="utf-8")) == data
     assert all(snapshot(tmp_path)[name] == content for name, content in before.items())
 
 
@@ -72,8 +72,8 @@ def test_rerun_tracks_source_alias_rules_and_same_stem(wiki_dir, tmp_path):
     (wiki_dir / "companies/Tesla.md").write_text("---\naliases_en: [Other]\n---\n", encoding="utf-8")
     assert extract(config, source)["entities"] == []
     assert extract(config, other)["entities"][0]["canonical"] == "BYD"
-    assert (tmp_path / ".glassgraph/cache/extraction/raw/a/same.json").exists()
-    assert (tmp_path / ".glassgraph/cache/extraction/raw/b/same.json").exists()
+    assert (tmp_path / ".glassgraph/cache/extraction/raw/a/same.md.json").exists()
+    assert (tmp_path / ".glassgraph/cache/extraction/raw/b/same.md.json").exists()
     assert state.read_text(encoding="utf-8") == "legacy state"
 
 
@@ -119,7 +119,7 @@ def test_unsafe_outputs_fail_before_writes(wiki_dir, tmp_path, mode, capsys):
     elif mode == "parent-file":
         (marker / "cache").write_text("retain", encoding="utf-8")
     elif mode == "cache-directory":
-        (marker / "cache/extraction/raw/sample.json").mkdir(parents=True)
+        (marker / "cache/extraction/raw/sample.md.json").mkdir(parents=True)
     else:
         (marker / "index").mkdir()
         os.link(wiki_dir / "companies/Tesla.md", marker / "index/aliases.json")
@@ -189,6 +189,57 @@ def test_installed_command_outside_checkout(wiki_dir, tmp_path, root_mode, entry
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["entities"]
     assert list((tmp_path / ".glassgraph").iterdir()) == []
+
+
+def test_nested_wiki_manifest_uses_vault_relative_paths(tmp_path):
+    marker = tmp_path / ".glassgraph"
+    marker.mkdir()
+    (marker / "config.toml").write_text('[paths]\nwiki="content/wiki"\n', encoding="utf-8")
+    page = tmp_path / "content/wiki/companies/Example.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("Example", encoding="utf-8")
+    make_source(tmp_path, text="Example")
+    extract(load_config(tmp_path), "raw/sample.md")
+    manifest = json.loads((marker / "index/manifest.json").read_text(encoding="utf-8"))
+    assert list(manifest["page_shas"]) == [str(Path("content/wiki/companies/Example.md"))]
+
+
+@pytest.mark.parametrize("field", ["tags: 1", "tags: [1]", "aliases_en: [1]"])
+def test_invalid_entity_lists_return_error_without_writes(wiki_dir, tmp_path, field, capsys):
+    make_source(tmp_path)
+    (wiki_dir / "companies/Tesla.md").write_text(f"---\n{field}\n---\n", encoding="utf-8")
+    before = snapshot(tmp_path)
+    assert main(["--root", str(tmp_path), "extract", "raw/sample.md"]) == 2
+    assert "metadata" in capsys.readouterr().err
+    assert snapshot(tmp_path) == before
+
+
+def test_invalid_source_encoding_and_null_path_return_error(wiki_dir, tmp_path, capsys):
+    source = make_source(tmp_path)
+    source.write_bytes(b"\xff")
+    before = snapshot(tmp_path)
+    for name in ("raw/sample.md", "raw/\0sample.md"):
+        assert main(["--root", str(tmp_path), "extract", name]) == 2
+        assert capsys.readouterr().err.startswith("glassgraph:")
+        assert snapshot(tmp_path) == before
+
+
+def test_uppercase_markdown_extension_is_preserved_in_cache(wiki_dir, tmp_path):
+    make_source(tmp_path, "sample.MD")
+    extract(load_config(tmp_path), "raw/sample.MD")
+    assert (tmp_path / ".glassgraph/cache/extraction/raw/sample.MD.json").exists()
+
+
+def test_case_sensitive_extension_variants_keep_separate_caches(wiki_dir, tmp_path):
+    first = make_source(tmp_path, "same.md", "Tesla")
+    second = tmp_path / "raw/same.MD"
+    if second.exists():
+        pytest.skip("The filesystem does not distinguish filename case")
+    second.write_text("BYD", encoding="utf-8")
+    config = load_config(tmp_path)
+    assert extract(config, first)["entities"][0]["canonical"] == "Tesla"
+    assert extract(config, second)["entities"][0]["canonical"] == "BYD"
+    assert len(list((tmp_path / ".glassgraph/cache/extraction/raw").glob("*.json"))) == 2
 
 
 @pytest.mark.parametrize("installed", [True, False])

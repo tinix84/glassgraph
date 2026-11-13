@@ -32,6 +32,8 @@ def _check_output(config: VaultConfig, path: Path, *, directory: bool = False) -
 
 def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -> dict:
     """Read one source and return legacy-compatible Stage 1 result fields."""
+    if "\0" in os.fspath(source):
+        raise ConfigError("Select a source path without null characters")
     source = Path(source)
     selected = source if source.is_absolute() else config.root / source
     if not config.allows(selected):
@@ -46,7 +48,8 @@ def extract(config: VaultConfig, source: str | Path, *, dry_run: bool = False) -
 
     index_dir = config.root / ".glassgraph/index"
     cache_dir = config.root / ".glassgraph/cache/extraction"
-    cache = cache_dir / selected.relative_to(config.root).with_suffix(".json")
+    relative_source = selected.relative_to(config.root)
+    cache = cache_dir / relative_source.parent / (relative_source.name + ".json")
     manifest_path = index_dir / "manifest.json"
     aliases_path = index_dir / "aliases.json"
     for target in (index_dir, cache_dir):

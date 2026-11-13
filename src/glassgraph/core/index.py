@@ -34,7 +34,7 @@ def _pages(wiki_root: Path, config: VaultConfig | None = None):
 def _page_shas(wiki_root: Path, config: VaultConfig | None = None) -> dict[str, str]:
     shas: dict[str, str] = {}
     for page in _pages(wiki_root, config):
-        rel = str(page.relative_to(wiki_root.parent))
+        rel = str(page.relative_to(config.root if config else wiki_root.parent))
         shas[rel] = _sha256(page)
     return shas
 
@@ -54,6 +54,8 @@ def _parse_aliases(page: Path) -> tuple[str, list[str]]:
     tags = fm.get("tags") or []
     if isinstance(tags, str):
         tags = [tags]
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ConfigError("Use string tags in entity metadata")
     if "merged" in tags:
         return canonical, []
 
