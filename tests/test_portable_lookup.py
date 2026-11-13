@@ -51,7 +51,7 @@ def test_pinned_lookup_report_and_status(wiki_dir, tmp_path, case, capsys):
 def test_alias_serialization_matches_pinned_baseline(wiki_dir):
     _, _, aliases = index.compile_index(wiki_dir)
     assert json.dumps(aliases, indent=2, ensure_ascii=False) == (FIXTURE / "aliases.json").read_text(encoding="utf-8")
-    assert aliases == {alias: owner.stem for alias, owner in index.alias_pages(wiki_dir).items()}
+    assert aliases == {alias: owner.page.stem for alias, owner in index.alias_owners(wiki_dir).items()}
 
 
 def test_unused_derived_state_is_not_read_or_changed(wiki_dir, tmp_path):
@@ -101,6 +101,31 @@ def test_current_alias_edits_are_visible(wiki_dir, tmp_path):
     (wiki_dir / "companies/Tesla.md").write_text("---\naliases_en: [NovelAlias]\n---\n", encoding="utf-8")
     assert lookup(config, "TSLA")[0] == 1
     assert lookup(config, "NovelAlias")[0] == 0
+
+
+def test_custom_alias_and_type_share_one_page_version(tmp_path, monkeypatch):
+    from glassgraph.core import frontmatter
+
+    config_file(tmp_path, '[paths]\nentity_dirs=["custom"]\n')
+    target = page(tmp_path, "custom", "Example", ["OldAlias"], "type: company\n")
+    config = load_config(tmp_path)
+    original = frontmatter.parse_file
+    reads = []
+
+    def changing_page(path):
+        if path != target:
+            return original(path)
+        reads.append(path)
+        if len(reads) == 1:
+            return frontmatter.parse("---\ntype: company\naliases_en: [OldAlias]\n---\n")
+        return frontmatter.parse("---\ntype: product\naliases_en: [NewAlias]\n---\n")
+
+    monkeypatch.setattr(frontmatter, "parse_file", changing_page)
+    assert lookup(config, "OldAlias") == (0, f"Example | company | {target}\n")
+    assert len(reads) == 1
+    assert lookup(config, "NewAlias") == (0, f"Example | product | {target}\n")
+    assert len(reads) == 2
+    assert lookup(config, "OldAlias")[0] == 1
 
 
 @pytest.mark.parametrize("kind", ["company", "technology", "product", "market", "theme"])

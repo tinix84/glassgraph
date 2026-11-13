@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from glassgraph.config import ConfigError, ENTITY_TYPES, VaultConfig
-from glassgraph.core import frontmatter, index
+from glassgraph.core import index
 
 
 T = TypeVar("T")
@@ -32,13 +32,13 @@ def lookup(config: VaultConfig, name: str) -> tuple[int, str]:
     """Return a status and report for the current configured alias owner."""
     if not config.wiki.is_dir():
         raise ConfigError("Select an existing configured wiki directory")
-    page = resolve_alias(name, index.alias_pages(config.wiki, config=config))
-    if page is None:
+    owner = resolve_alias(name, index.alias_owners(config.wiki, config=config))
+    if owner is None:
         return 1, format_not_found(name)
+    page = owner.page
     page_type = ENTITY_TYPES.get(page.parent.name.casefold())
     if page_type is None:
-        parsed = frontmatter.parse_file(page)
-        page_type = (parsed.metadata or {}).get("type")
+        page_type = owner.declared_type
         if not isinstance(page_type, str) or page_type not in ENTITY_TYPES.values():
             raise ConfigError("Declare a supported entity type in custom lookup directories")
     return 0, format_found(page.stem, page_type, page)

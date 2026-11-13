@@ -187,7 +187,8 @@ python -m glassgraph lookup Example
 
 Lookup uses shared root discovery and the current configured alias dictionary.
 It prints `canonical | type | native absolute page path` for the owning page.
-It does not read or write derived state or require writable output paths.
+It does not read or write derived state.
+It can run without write access to the vault.
 
 Exact aliases take precedence. The fallback uses Python lowercase matching, with the legacy last-key ordering for lowercase collisions.
 Exact alias collisions retain the first eligible owner in configured directory order.
@@ -196,6 +197,7 @@ Merged and excluded pages do not contribute aliases.
 
 Default folder names infer the legacy entity types, ignoring folder-name case.
 Custom folders use the selected page's declared entity type. An unsupported or missing custom type is an error.
+Lookup takes the alias and declared type from one parse of the owner page.
 Exit codes are `0` for found and `1` for not found. Invalid configuration or a read error returns `2`.
 Lookup does not add aliases or create wiki pages.
 
