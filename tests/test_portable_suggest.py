@@ -226,13 +226,13 @@ def test_unreadable_config_cannot_fall_back_to_defaults(wiki_dir, tmp_path, monk
     config_file.parent.mkdir()
     config_file.write_text("", encoding="utf-8")
     before = snapshot(tmp_path)
-    original_stat = Path.stat
+    original_exists = Path.exists
     original_open = Path.open
 
-    def denied_stat(path, *args, **kwargs):
+    def hidden_config(path):
         if path == config_file:
-            raise PermissionError("Cannot inspect configuration")
-        return original_stat(path, *args, **kwargs)
+            return False
+        return original_exists(path)
 
     def denied_open(path, *args, **kwargs):
         if path == config_file:
@@ -240,7 +240,7 @@ def test_unreadable_config_cannot_fall_back_to_defaults(wiki_dir, tmp_path, monk
         return original_open(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(Path, "stat", denied_stat)
+        patch.setattr(Path, "exists", hidden_config)
         patch.setattr(Path, "open", denied_open)
         assert main(["--root", str(tmp_path), "suggest", "raw/sample.md"]) == 2
     output = capsys.readouterr()
