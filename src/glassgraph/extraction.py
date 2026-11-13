@@ -56,6 +56,20 @@ def disambiguation_path(config: VaultConfig) -> Path:
     return path
 
 
+def suggest(config: VaultConfig, source: str | Path, *, top_n: int = 20) -> str:
+    """Propose current alias candidates without reading or writing caches."""
+    from glassgraph.core import suggest as ranker
+
+    if top_n < 0:
+        raise ConfigError("Use a nonnegative candidate limit")
+    selected = resolve_source(config, source)
+    body = linker._preprocess(selected.read_text(encoding="utf-8"))
+    _, _, aliases = index.compile_index(config.wiki, config=config)
+    df = ranker.compute_df_index(config.wiki / "sources", config=config)
+    ranked = ranker.rank_candidates(body, known_aliases=set(aliases), df=df, top_n=top_n)
+    return ranker.format_report(ranked)
+
+
 def explain(
     config: VaultConfig,
     source: str | Path,

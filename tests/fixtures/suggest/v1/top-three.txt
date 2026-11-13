@@ -1,0 +1,5 @@
+=== Alias candidates ===
+
+  tf=2    df=1    score=1.00  '新型器件'
+  tf=2    df=1    score=1.00  'Nova'
+  tf=2    df=1    score=1.00  'Nova Switch'

@@ -46,7 +46,14 @@ errors, warnings = validate_meta(page.metadata, "company")
 The package supplies parsing, structural validation, and writer policy.
 The legacy `frontmatter.py` delegates to the same implementation, including in an uninstalled source checkout.
 Existing scripts retain their commands and dependencies below.
-The package exposes portable lint, Stage 1 extraction, and explanation. Other scripts retain their entry points during incremental migration.
+The package exposes these portable commands:
+
+- Lint
+- Stage 1 extraction
+- Explanation
+- Alias suggestions
+
+Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
 
 ### Run portable lint
@@ -146,6 +153,28 @@ They are debugging coordinates, not original-file evidence locators.
 The legacy summary counts all accepted hits and warnings, while its unique-canonical count follows the filter.
 Suppression warnings retain their legacy behavior and do not follow the canonical filter.
 Exit codes are `0` for success and `2` for invalid configuration, options, or read errors.
+
+### Propose alias candidates
+
+```powershell
+glassgraph --root 'D:\vault' suggest raw/example.md
+glassgraph suggest raw/example.md --top 10
+python -m glassgraph suggest wiki/sources/example.md
+```
+
+Suggestions use the same input selection and alias dictionary as portable extraction.
+The command reads current source pages and computes document frequencies in memory.
+It prints the existing ranked report without changing the vault or reading derived caches.
+It does not require writable output paths or disambiguation rules.
+Review each proposal before adding an alias.
+
+`--top` limits the number of candidates. Its default is 20. Zero is valid, and negative values are errors.
+Scores use the legacy formula `TF / (DF + 1)`. Equal scores retain the candidate tokenizer's order.
+The target excludes frontmatter and fenced text before tokenization.
+Document frequencies preserve the legacy behavior. They use complete top-level Markdown source files, including frontmatter and fenced text.
+Configured exclusions apply to the dictionary and document-frequency corpus.
+A missing or fully excluded source directory gives an empty document-frequency corpus.
+Exit code `0` means success. Invalid input or a read error returns `2`.
 
 ### Run the existing linker
 

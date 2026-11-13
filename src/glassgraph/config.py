@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path, PureWindowsPath
 from dataclasses import dataclass
+from collections.abc import Iterator
 
 try:
     import tomllib
@@ -55,6 +56,18 @@ class VaultConfig:
     entity_dirs: tuple[str, ...]
     exclude: tuple[Path, ...]
     zotero_db: Path | None
+
+    def markdown_files(self, directory: Path) -> Iterator[Path]:
+        """Scan one configured directory without hiding read failures."""
+        if not self.allows(directory):
+            return
+        try:
+            pages = sorted(page for page in directory.iterdir() if page.match("*.md"))
+        except FileNotFoundError:
+            return
+        for page in pages:
+            if self.allows(page):
+                yield page
 
     def allows(self, path: Path) -> bool:
         """Exclude configured paths and reject scanned files outside the vault."""

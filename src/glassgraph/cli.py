@@ -29,9 +29,17 @@ def main(argv: list[str] | None = None) -> int:
     explain_parser.add_argument("--filter", dest="filter_canonical", help="Show matches for one canonical entity")
     explain_parser.add_argument("--suppressed", action="store_true", help="Show disambiguation warnings")
     explain_parser.add_argument("--context", type=int, default=30, help="Surrounding characters per side (default: 30)")
+    suggest_parser = commands.add_parser("suggest", help="Propose alias candidates without writing state")
+    suggest_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    suggest_parser.add_argument("source", help="Markdown source path relative to the vault root")
+    suggest_parser.add_argument("--top", type=int, default=20, help="Candidate limit (default: 20)")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "suggest":
+            from glassgraph.extraction import suggest
+            print(suggest(config, args.source, top_n=args.top), end="")
+            return 0
         if args.command == "explain":
             from glassgraph.extraction import explain
             print(explain(config, args.source, filter_canonical=args.filter_canonical,
