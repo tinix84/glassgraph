@@ -1,0 +1,13 @@
+[12:15]   '特斯拉' → Tesla  via '特斯拉'
+            context: Tesla coil. 特斯拉 uses SiC MOSFET. BYD and TSLA...
+[21:31]   'SiC MOSFET' → SiC-MOSFET  via 'SiC MOSFET'
+            context: Tesla coil. 特斯拉 uses SiC MOSFET. BYD and TSLA.
+[33:36]   'BYD' → BYD  via 'BYD'
+            context: ...la coil. 特斯拉 uses SiC MOSFET. BYD and TSLA.
+[41:45]   'TSLA' → Tesla  via 'TSLA'
+            context: ... 特斯拉 uses SiC MOSFET. BYD and TSLA.
+
+=== SUPPRESSED (disambiguation) ===
+  Suppressed 'Tesla' → 'Tesla' (matched disambiguation pattern 'tesla coil')
+
+Summary: 4 hits, 3 unique canonicals, 1 disambiguation warnings

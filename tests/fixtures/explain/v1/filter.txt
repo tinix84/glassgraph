@@ -1,0 +1,6 @@
+[12:15]   '特斯拉' → Tesla  via '特斯拉'
+            context: Tesla coil. 特斯拉 uses SiC MOSFET. BYD and TSLA...
+[41:45]   'TSLA' → Tesla  via 'TSLA'
+            context: ... 特斯拉 uses SiC MOSFET. BYD and TSLA.
+
+Summary: 4 hits, 1 unique canonicals, 1 disambiguation warnings

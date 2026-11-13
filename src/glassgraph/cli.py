@@ -23,9 +23,20 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     extract_parser.add_argument("source", help="Markdown source path relative to the vault root")
     extract_parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing derived state")
+    explain_parser = commands.add_parser("explain", help="Explain Stage 1 matches without writing state")
+    explain_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    explain_parser.add_argument("source", help="Markdown source path relative to the vault root")
+    explain_parser.add_argument("--filter", dest="filter_canonical", help="Show matches for one canonical entity")
+    explain_parser.add_argument("--suppressed", action="store_true", help="Show disambiguation warnings")
+    explain_parser.add_argument("--context", type=int, default=30, help="Surrounding characters per side (default: 30)")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "explain":
+            from glassgraph.extraction import explain
+            print(explain(config, args.source, filter_canonical=args.filter_canonical,
+                          show_suppressed=args.suppressed, context_chars=args.context), end="")
+            return 0
         if args.command == "extract":
             from glassgraph.extraction import extract
             print(json.dumps(extract(config, args.source, dry_run=args.dry_run), indent=2, ensure_ascii=False))
