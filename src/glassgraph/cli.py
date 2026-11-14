@@ -44,9 +44,20 @@ def main(argv: list[str] | None = None) -> int:
     cluster_parser.add_argument("--min-sources", type=int, default=5, help="Minimum pair co-citations (default: 5)")
     cluster_parser.add_argument("--coverage", type=float, default=0.6, help="Theme coverage fraction (default: 0.6)")
     cluster_parser.add_argument("--date", dest="date_str", help="Report date in YYYY-MM-DD form")
+    index_parser = commands.add_parser("gen-index", help="Print the read-only wiki catalog")
+    index_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "gen-index":
+            from glassgraph.wiki.gen_index import generate
+            if not config.wiki.is_dir():
+                raise ConfigError("Select an existing configured wiki directory")
+            text = generate(config.wiki, config=config)
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(newline="")
+            sys.stdout.write(text)
+            return 0
         if args.command == "cluster":
             from glassgraph.core.cluster import preview
             print(preview(config, min_sources=args.min_sources, coverage=args.coverage,

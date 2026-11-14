@@ -250,6 +250,24 @@ Malformed relevant metadata is an error on the portable path.
 Exit code `0` includes an empty result. Invalid input or a read error returns `2`.
 The legacy `link.py cluster` command retains its report-file behavior.
 
+### Preview the wiki catalog
+
+```powershell
+glassgraph --root 'D:\vault' gen-index
+python -m glassgraph gen-index
+```
+
+The command prints the complete catalog as UTF-8 with LF line endings. It does not write `wiki/index.md` or derived state.
+Root discovery, configured wiki/entity directories and exclusions use the shared configuration.
+The banner and output section order retain the legacy format for byte parity.
+Known folders classify pages by folder name, without case sensitivity.
+Custom entity folders require a supported declared entity type. Their scan order follows the configuration.
+Pages within each folder are sorted by path. Stubs use the `stub` tag. Merged tombstones are omitted.
+Missing optional entity and source folders are empty. The configured wiki directory must exist.
+Sources without frontmatter have an empty summary. Entity pages require frontmatter.
+Invalid relevant metadata, duplicate entity names or read failures return `2` without partial output. Success returns `0`.
+The installed command has no apply option. The legacy vault adapter retains its explicit write behavior.
+
 ### Run the existing linker
 
 ```bash
