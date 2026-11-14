@@ -1,1 +1,2 @@
 tests/fixtures/benchmark/v1/** text eol=lf
+tests/fixtures/gen_index/v1/** text eol=lf
