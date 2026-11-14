@@ -39,9 +39,19 @@ def main(argv: list[str] | None = None) -> int:
     relink_parser = commands.add_parser("relink", help="Preview source relinking without writing the page")
     relink_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     relink_parser.add_argument("source", help="Curated Markdown source relative to the vault root")
+    cluster_parser = commands.add_parser("cluster", help="Print a read-only co-occurrence cluster report")
+    cluster_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    cluster_parser.add_argument("--min-sources", type=int, default=5, help="Minimum pair co-citations (default: 5)")
+    cluster_parser.add_argument("--coverage", type=float, default=0.6, help="Theme coverage fraction (default: 0.6)")
+    cluster_parser.add_argument("--date", dest="date_str", help="Report date in YYYY-MM-DD form")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "cluster":
+            from glassgraph.core.cluster import preview
+            print(preview(config, min_sources=args.min_sources, coverage=args.coverage,
+                          date_str=args.date_str), end="")
+            return 0
         if args.command == "relink":
             from glassgraph.extraction import relink
             preview = relink(config, args.source)
