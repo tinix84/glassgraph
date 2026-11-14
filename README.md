@@ -57,9 +57,30 @@ The package exposes these portable commands:
 - Co-occurrence cluster reports
 - Wiki catalog generation
 - Write/Edit frontmatter validation hook
+- Validated page rendering previews
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
+
+### Preview a validated page
+
+```powershell
+glassgraph --root 'D:\vault' write-page --type company --path wiki/companies/Acme.md --meta meta.json --body body.md --dry-run
+```
+
+The command prints the complete proposed page to stdout. It writes no page, cache, report, or state file.
+Preview is the default. `--dry-run` makes that choice explicit. There is no apply option.
+Warnings go to stderr. Exit codes are 0 for a valid preview, 1 for schema errors, and 2 for input/configuration errors.
+Errors produce no partial page text on stdout.
+
+Root discovery follows the shared flag, environment, and upward-marker order.
+Relative target, metadata, and body paths start at the vault root. Absolute metadata/body paths can point outside the vault.
+Targets must be Markdown paths inside the configured wiki and outside configured exclusions. New parent directories need not exist.
+Existing target content remains unchanged.
+
+The renderer preserves the legacy field order, alias union, Unicode serialization, relation body hash, and writer-schema warnings.
+The legacy `write_page.py` adapter retains direct-write behavior through the same renderer.
+Portable apply behavior and runtime-state migration remain separate.
 
 ### Configure the portable validation hook
 

@@ -1,0 +1,238 @@
+[
+  {
+    "name": "company",
+    "page_type": "company",
+    "meta": {
+      "type": "company",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "country": "Example",
+      "kind": "other"
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: company\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\ncountry: Example\nkind: other\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "technology",
+    "page_type": "technology",
+    "meta": {
+      "type": "technology",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "category": "control"
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: technology\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\ncategory: control\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "product",
+    "page_type": "product",
+    "meta": {
+      "type": "product",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "vendor": "[[Acme]]",
+      "category": "psu",
+      "released": "?"
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: product\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\ncategory: psu\nvendor: '[[Acme]]'\nreleased: '?'\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "market",
+    "page_type": "market",
+    "meta": {
+      "type": "market",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "sector": "industrial"
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: market\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\nsector: industrial\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "theme",
+    "page_type": "theme",
+    "meta": {
+      "type": "theme",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "thesis": "An example thesis",
+      "status": "open"
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: theme\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\nthesis: An example thesis\nstatus: open\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "source",
+    "page_type": "source",
+    "meta": {
+      "type": "source",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "source_url": "https://example.invalid/clip",
+      "source_lang": "en",
+      "source_created": "2026-01-01",
+      "ingested": "2026-01-02",
+      "source_kind": "technical",
+      "touches": [
+        "[[Acme]]"
+      ]
+    },
+    "body": "\n\nExample body with Unicode Ω.\n",
+    "expected": "---\ntype: source\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\nsource_url: https://example.invalid/clip\nsource_lang: en\nsource_created: '2026-01-01'\nsource_kind: technical\ningested: '2026-01-02'\ntouches:\n- '[[Acme]]'\n---\n\nExample body with Unicode Ω.\n",
+    "warnings": []
+  },
+  {
+    "name": "relations",
+    "page_type": "company",
+    "meta": {
+      "type": "company",
+      "aliases_en": [
+        "Acme",
+        " acme ",
+        "Acme"
+      ],
+      "aliases_cn": [
+        "示例"
+      ],
+      "tags": [],
+      "created": "2026-01-01",
+      "updated": "2026-01-02",
+      "sources": [
+        "clip.md"
+      ],
+      "aliases": "replace this computed value",
+      "zotero_key": "EXAMPLE1",
+      "custom": {
+        "enabled": true
+      },
+      "relations": [
+        {
+          "s": "[[Acme]]",
+          "p": "mentions",
+          "o": "[[Widget]]",
+          "by": "example"
+        }
+      ],
+      "relations_src_md5": "old"
+    },
+    "body": "\nRelationship body.\n\n",
+    "expected": "---\ntype: company\naliases:\n- Acme\n- acme\n- 示例\naliases_en:\n- Acme\n- ' acme '\n- Acme\naliases_cn:\n- 示例\ntags: []\ncreated: '2026-01-01'\nupdated: '2026-01-02'\nsources:\n- clip.md\nrelations:\n- s: '[[Acme]]'\n  p: mentions\n  o: '[[Widget]]'\n  by: example\nrelations_src_md5: 22f55d5d6bf4c59e11324061ffe9dc7c\nzotero_key: EXAMPLE1\ncustom:\n  enabled: true\n---\n\nRelationship body.\n\n",
+    "warnings": [
+      "country: missing/empty (recommended for company pages)",
+      "kind: missing/empty (recommended for company pages)"
+    ]
+  },
+  {
+    "name": "merged",
+    "page_type": "company",
+    "meta": {
+      "type": "company",
+      "tags": [
+        "merged"
+      ]
+    },
+    "body": "Merged.\n",
+    "expected": "---\ntype: company\naliases: []\ntags:\n- merged\n---\n\nMerged.\n",
+    "warnings": [
+      "country: missing/empty (recommended for company pages)",
+      "kind: missing/empty (recommended for company pages)"
+    ]
+  },
+  {
+    "name": "source-no-aliases",
+    "page_type": "source",
+    "meta": {
+      "type": "source",
+      "source_url": "https://example.invalid/clip",
+      "source_lang": "en",
+      "source_created": "2026-01-01",
+      "ingested": "2026-01-02",
+      "source_kind": "technical",
+      "touches": [
+        "[[Acme]]"
+      ]
+    },
+    "body": "Source.\n",
+    "expected": "---\ntype: source\nsource_url: https://example.invalid/clip\nsource_lang: en\nsource_created: '2026-01-01'\nsource_kind: technical\ningested: '2026-01-02'\ntouches:\n- '[[Acme]]'\n---\n\nSource.\n",
+    "warnings": []
+  }
+]
