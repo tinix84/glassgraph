@@ -70,7 +70,7 @@ def validate_meta(meta: dict, page_type: str) -> tuple[list[str], list[str]]:
                 if not isinstance(r, dict) or {"s", "p", "o", "by"} - r.keys():
                     errors.append(f"relations[{i}]: needs keys s,p,o,by")
                     continue
-                if r["p"] not in PREDICATES:
+                if not isinstance(r["p"], str) or r["p"] not in PREDICATES:
                     errors.append(f"relations[{i}]: unknown predicate {r['p']!r}")
                 if not _WIKILINK_ONLY_RE.match(str(r["s"]).strip()):
                     errors.append(f"relations[{i}].s: must be a \"[[wikilink]]\"")

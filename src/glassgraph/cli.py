@@ -48,12 +48,35 @@ def main(argv: list[str] | None = None) -> int:
     index_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     hook_parser = commands.add_parser("hook", help="Validate proposed wiki Write/Edit content from stdin")
     hook_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    page_parser = commands.add_parser("write-page", help="Preview a validated page without writing it")
+    page_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    from glassgraph.wiki import schema
+    page_parser.add_argument("--type", required=True, choices=schema.PAGE_TYPES)
+    page_parser.add_argument("--path", required=True, help="Proposed Markdown target in the configured wiki")
+    page_parser.add_argument("--meta", required=True, help="Metadata JSON file")
+    page_parser.add_argument("--body", required=True, help="Markdown body file")
+    page_parser.add_argument("--dry-run", action="store_true", help="Preview only (also the default)")
     args = parser.parse_args(argv)
     if args.command == "hook":
         from glassgraph.wiki.hook import from_stdin
         return from_stdin(args.root)
     try:
         config = load_config(args.root)
+        if args.command == "write-page":
+            from glassgraph.wiki.write_page import ValidationError, preview
+            try:
+                text, warnings = preview(config, args.path, args.type, args.meta, args.body)
+            except ValidationError as error:
+                print("VALIDATION FAILED — nothing written:", file=sys.stderr)
+                for message in error.errors:
+                    print(f"  - {message}", file=sys.stderr)
+                return 1
+            for warning in warnings:
+                print(f"WARN: {warning}", file=sys.stderr)
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(newline="")
+            sys.stdout.write(text)
+            return 0
         if args.command == "gen-index":
             from glassgraph.wiki.gen_index import generate
             if not config.wiki.is_dir():
