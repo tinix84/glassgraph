@@ -125,4 +125,3 @@ def generate(wiki_root: Path, *, config: VaultConfig | None = None) -> str:
             out.append(", ".join(f"[[{s}]]" for s in stubs[d]))
 
     return "\n".join(out) + "\n"
-
