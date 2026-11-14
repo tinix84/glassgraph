@@ -105,7 +105,13 @@ def run(data: object, root: str | Path | None = None, *, legacy: bool = False) -
     if not isinstance(tool_input, dict):
         return 0
     try:
-        path = _target(data, tool_input)
+        if legacy:
+            value = tool_input.get("file_path", "")
+            if not isinstance(value, str) or "\0" in value:
+                raise ConfigError("Supply a string file_path")
+            path = Path(value)
+        else:
+            path = _target(data, tool_input)
         if path.suffix.lower() != ".md" or path.name in EXEMPT_NAMES:
             return 0
         if legacy:
@@ -121,9 +127,11 @@ def run(data: object, root: str | Path | None = None, *, legacy: bool = False) -
         errors = check(content)
         if not errors:
             return 0
+        guidance = ("Fix the frontmatter and retry, or use .tools/wikilib/write_page.py.\n"
+                    if legacy else "Fix the frontmatter and retry.\n")
         sys.stderr.write("WIKI WRITE BLOCKED — invalid frontmatter:\n"
                          + "".join(f"  - {e}\n" for e in errors)
-                         + "Fix the frontmatter and retry, or use .tools/wikilib/write_page.py.\n")
+                         + guidance)
         return 2
     except (ConfigError, OSError, UnicodeError, ValueError) as error:
         print(f"glassgraph hook: {error}", file=sys.stderr)

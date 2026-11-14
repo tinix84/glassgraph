@@ -192,3 +192,17 @@ def test_invalid_cwd(tmp_path):
     root = vault(tmp_path)
     assert hook.run(payload("wiki/Acme.md", cwd=[]), root) == 2
     assert hook.run(payload("wiki/Acme.md", cwd="relative"), root) == 2
+
+
+def test_legacy_scope_uses_original_path_and_process_cwd(tmp_path, monkeypatch):
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    monkeypatch.chdir(wiki)
+    assert hook.run(payload("Acme.md", DUP), legacy=True) == 0
+    assert hook.run(payload("Acme.md", DUP, cwd=str(wiki)), legacy=True) == 0
+    monkeypatch.chdir(tmp_path)
+    assert hook.run(payload("wiki/Acme.md", DUP, cwd=str(tmp_path / "elsewhere")), legacy=True) == 2
+    (wiki / "Acme.md").write_text(GOOD, encoding="utf-8")
+    data = {"tool_name": "Edit", "cwd": str(tmp_path / "elsewhere"),
+            "tool_input": {"file_path": "wiki/Acme.md", "old_string": "type: company", "new_string": "type: bad"}}
+    assert hook.run(data, legacy=True) == 2
