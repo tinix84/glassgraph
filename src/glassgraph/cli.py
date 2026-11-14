@@ -36,9 +36,19 @@ def main(argv: list[str] | None = None) -> int:
     lookup_parser = commands.add_parser("lookup", help="Resolve a name or alias without writing state")
     lookup_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     lookup_parser.add_argument("name", help="Canonical name or alias")
+    relink_parser = commands.add_parser("relink", help="Preview source relinking without writing the page")
+    relink_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    relink_parser.add_argument("source", help="Curated Markdown source relative to the vault root")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.root)
+        if args.command == "relink":
+            from glassgraph.extraction import relink
+            preview = relink(config, args.source)
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(newline="")
+            sys.stdout.write(preview)
+            return 0
         if args.command == "lookup":
             from glassgraph.core.lookup import lookup
             status, report = lookup(config, args.name)

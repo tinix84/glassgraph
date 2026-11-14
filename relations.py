@@ -86,10 +86,12 @@ def _load_frontmatter():
 
 
 _fm = _load_frontmatter()
-_SUBSECTION_RE = re.compile(r"^###\s+.*mentioned", re.IGNORECASE)
-_KEYX_RE = re.compile(r"^##\s+Key extractions", re.IGNORECASE)
-_H2_RE = re.compile(r"^##\s+")
-_BULLET_RE = re.compile(r"^-\s+\[\[([^\[\]\|]+?)(?:\|[^\[\]]+)?\]\]\s*[—-]\s*(.*)$")
+from glassgraph.core.source_sections import (
+    SUBSECTION_RE as _SUBSECTION_RE,
+    KEY_EXTRACTIONS_RE as _KEYX_RE,
+    H2_RE as _H2_RE,
+    BULLET_RE as _BULLET_RE,
+)
 
 
 @dataclass(frozen=True)
