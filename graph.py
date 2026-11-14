@@ -1,7 +1,6 @@
 """NetworkX-backed graph metrics for backfill audit. Pattern from tinix84_twin/graph_analysis.py."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import networkx as nx
@@ -23,24 +22,11 @@ def _load_frontmatter():
 frontmatter = _load_frontmatter()
 
 _ENTITY_DIRS = ("companies", "technologies", "products", "themes")
-_WIKILINK_RE = re.compile(r"^\[\[(.+?)(\|.+?)?\]\]$")
-
-
-def _strip_wikilink(entry: str) -> str:
-    """'[[Tesla|alias]]' → 'Tesla'. Bare 'Tesla' passes through."""
-    m = _WIKILINK_RE.match(entry.strip())
-    return m.group(1) if m else entry.strip()
-
-
-def _parse_touches(source_page: Path) -> list[str]:
-    """Return list of bare canonical names from touches: frontmatter."""
-    fm = frontmatter.parse_file(source_page).metadata
-    if not fm:
-        return []
-    raw = fm.get("touches") or []
-    if isinstance(raw, str):
-        raw = [raw]
-    return [_strip_wikilink(str(t)) for t in raw if t]
+from glassgraph.core.source_metadata import (
+    WIKILINK_RE as _WIKILINK_RE,
+    strip_wikilink as _strip_wikilink,
+    parse_touches as _parse_touches,
+)
 
 
 def build_current_graph(sources_dir: Path) -> nx.DiGraph:

@@ -1,0 +1,115 @@
+[
+  {
+    "name": "default",
+    "min_sources": 5,
+    "coverage": 0.6,
+    "date": "2026-06-13",
+    "report": "# Theme Cluster Report — 2026-06-13\n\nCo-occurrence threshold: >= 5 shared sources. Coverage filter: dropped clusters >= 60% cited by an existing theme.\nUncovered candidate clusters: 1\n\n## Candidate 1  <-- TOP CANDIDATE (draft a thesis)\n- Entities: [[HVDC]], [[SiC-MOSFET]]\n- Co-citation strength: 5 | evidence sources: 5\n- Evidence: [[拆解0.md]], [[拆解1.md]], [[拆解2.md]], [[拆解3.md]], [[拆解4.md]]\n\n",
+    "candidates": [
+      {
+        "entities": [
+          "HVDC",
+          "SiC-MOSFET"
+        ],
+        "sources": [
+          "拆解0",
+          "拆解1",
+          "拆解2",
+          "拆解3",
+          "拆解4"
+        ],
+        "pair_strength": 5,
+        "source_count": 5
+      }
+    ]
+  },
+  {
+    "name": "uncovered-ties",
+    "min_sources": 5,
+    "coverage": 1.0,
+    "date": "2026-06-13",
+    "report": "# Theme Cluster Report — 2026-06-13\n\nCo-occurrence threshold: >= 5 shared sources. Coverage filter: dropped clusters >= 100% cited by an existing theme.\nUncovered candidate clusters: 2\n\n## Candidate 1  <-- TOP CANDIDATE (draft a thesis)\n- Entities: [[Data-center]], [[GaN-HEMT]]\n- Co-citation strength: 5 | evidence sources: 5\n- Evidence: [[ab0.md]], [[ab1.md]], [[ab2.md]], [[ab3.md]], [[ab4.md]]\n\n## Candidate 2  <-- TOP CANDIDATE (draft a thesis)\n- Entities: [[HVDC]], [[SiC-MOSFET]]\n- Co-citation strength: 5 | evidence sources: 5\n- Evidence: [[拆解0.md]], [[拆解1.md]], [[拆解2.md]], [[拆解3.md]], [[拆解4.md]]\n\n",
+    "candidates": [
+      {
+        "entities": [
+          "Data-center",
+          "GaN-HEMT"
+        ],
+        "sources": [
+          "ab0",
+          "ab1",
+          "ab2",
+          "ab3",
+          "ab4"
+        ],
+        "pair_strength": 5,
+        "source_count": 5
+      },
+      {
+        "entities": [
+          "HVDC",
+          "SiC-MOSFET"
+        ],
+        "sources": [
+          "拆解0",
+          "拆解1",
+          "拆解2",
+          "拆解3",
+          "拆解4"
+        ],
+        "pair_strength": 5,
+        "source_count": 5
+      }
+    ]
+  },
+  {
+    "name": "connected",
+    "min_sources": 3,
+    "coverage": 0.6,
+    "date": "2026-06-13",
+    "report": "# Theme Cluster Report — 2026-06-13\n\nCo-occurrence threshold: >= 3 shared sources. Coverage filter: dropped clusters >= 60% cited by an existing theme.\nUncovered candidate clusters: 1\n\n## Candidate 1  <-- TOP CANDIDATE (draft a thesis)\n- Entities: [[Data-center]], [[GaN-HEMT]], [[HVDC]], [[SiC-MOSFET]]\n- Co-citation strength: 13 | evidence sources: 13\n- Evidence: [[ab0.md]], [[ab1.md]], [[ab2.md]], [[ab3.md]], [[ab4.md]], [[bridge0.md]], [[bridge1.md]], [[bridge2.md]], [[拆解0.md]], [[拆解1.md]], [[拆解2.md]], [[拆解3.md]] …\n\n",
+    "candidates": [
+      {
+        "entities": [
+          "Data-center",
+          "GaN-HEMT",
+          "HVDC",
+          "SiC-MOSFET"
+        ],
+        "sources": [
+          "ab0",
+          "ab1",
+          "ab2",
+          "ab3",
+          "ab4",
+          "bridge0",
+          "bridge1",
+          "bridge2",
+          "拆解0",
+          "拆解1",
+          "拆解2",
+          "拆解3",
+          "拆解4"
+        ],
+        "pair_strength": 13,
+        "source_count": 13
+      }
+    ]
+  },
+  {
+    "name": "empty",
+    "min_sources": 6,
+    "coverage": 0.6,
+    "date": "2026-06-13",
+    "report": "# Theme Cluster Report — 2026-06-13\n\nCo-occurrence threshold: >= 6 shared sources. Coverage filter: dropped clusters >= 60% cited by an existing theme.\nUncovered candidate clusters: 0\n\n(No uncovered candidate clusters — theme layer is current.)\n",
+    "candidates": []
+  },
+  {
+    "name": "zero-coverage",
+    "min_sources": 5,
+    "coverage": 0.0,
+    "date": "2026-06-13",
+    "report": "# Theme Cluster Report — 2026-06-13\n\nCo-occurrence threshold: >= 5 shared sources. Coverage filter: dropped clusters >= 0% cited by an existing theme.\nUncovered candidate clusters: 0\n\n(No uncovered candidate clusters — theme layer is current.)\n",
+    "candidates": []
+  }
+]

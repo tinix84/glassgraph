@@ -54,6 +54,7 @@ The package exposes these portable commands:
 - Alias suggestions
 - Alias lookup
 - Source relinking previews
+- Co-occurrence cluster reports
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
@@ -221,6 +222,33 @@ It skips the bullet subject and existing wikilinks. Alias surfaces use piped lin
 The primitive retains its existing heading and fenced-text behavior. It is not a general Markdown editor.
 Repeated application is idempotent.
 Exit code `0` means a preview was produced, including an unchanged preview. Invalid input or a read error returns `2`.
+
+### Inspect co-occurrence clusters
+
+```powershell
+glassgraph --root 'D:\vault' cluster
+glassgraph cluster --min-sources 3 --coverage 0.8 --date 2026-11-14
+python -m glassgraph cluster
+```
+
+The command prints the existing cluster report without changing the vault.
+It reads current source touches and theme source lists through configured scans.
+It does not access derived caches or require writable output paths.
+Reports describe declared co-occurrence and cited-source coverage at the selected thresholds.
+Review candidates before creating a theme. The command creates no pages or log entries.
+
+`--min-sources` is a positive pair co-citation threshold. Its default is 5.
+`--coverage` is a finite fraction from 0 to 1. Its default is 0.6.
+`--date` accepts a calendar date in `YYYY-MM-DD` form. The default is the local date.
+Use an explicit date for repeatable output. All groups remain in the report, with the legacy top-three markers.
+
+Sources come from top-level Markdown files under the configured wiki/sources directory.
+Theme coverage uses configured theme folders and declared theme pages in custom entity folders.
+Configured exclusions apply to both inputs. Missing optional inputs are empty.
+String and list-of-strings fields retain their legacy interpretation. Missing or null fields are empty.
+Malformed relevant metadata is an error on the portable path.
+Exit code `0` includes an empty result. Invalid input or a read error returns `2`.
+The legacy `link.py cluster` command retains its report-file behavior.
 
 ### Run the existing linker
 
