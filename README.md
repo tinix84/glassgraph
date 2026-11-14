@@ -55,9 +55,33 @@ The package exposes these portable commands:
 - Alias lookup
 - Source relinking previews
 - Co-occurrence cluster reports
+- Wiki catalog generation
+- Write/Edit frontmatter validation hook
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
+
+### Configure the portable validation hook
+
+Use the installed environment's Python executable in a PreToolUse command for `Write|Edit`:
+
+```text
+python -m glassgraph.wiki.hook
+```
+
+`glassgraph hook` accepts the same JSON payload on standard input. Both commands accept `--root PATH`.
+Without a flag or `GLASSGRAPH_ROOT`, discovery starts at the target parent, including for new nested paths.
+Relative targets use the payload's absolute `cwd`, or the process working directory when absent.
+
+The hook checks Markdown recursively inside the configured wiki. It honors exclusions and ignores `.archive` paths.
+The legacy exempt basenames are `index.md`, `log.md`, and `overview.md`.
+The structural gate checks BOM, YAML errors, duplicate keys, page type, touches, and relation record shape.
+It preserves the five legacy page types. It does not apply full writer-schema checks or accept `market` pages.
+
+Exit 0 permits valid, out-of-scope, or irrelevant requests. Exit 2 blocks invalid content or applicable configuration/read errors.
+Malformed JSON envelopes are ignored. Missing Edit targets and unmatched strings remain the tool's responsibility.
+The hook previews the resulting content without writing pages, caches, reports, or state.
+The legacy script retains its unconfigured literal-wiki scope through a compatibility adapter.
 
 ### Run portable lint
 

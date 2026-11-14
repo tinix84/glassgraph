@@ -46,7 +46,12 @@ def main(argv: list[str] | None = None) -> int:
     cluster_parser.add_argument("--date", dest="date_str", help="Report date in YYYY-MM-DD form")
     index_parser = commands.add_parser("gen-index", help="Print the read-only wiki catalog")
     index_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
+    hook_parser = commands.add_parser("hook", help="Validate proposed wiki Write/Edit content from stdin")
+    hook_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     args = parser.parse_args(argv)
+    if args.command == "hook":
+        from glassgraph.wiki.hook import from_stdin
+        return from_stdin(args.root)
     try:
         config = load_config(args.root)
         if args.command == "gen-index":
