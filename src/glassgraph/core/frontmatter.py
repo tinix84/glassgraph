@@ -119,13 +119,17 @@ def parse(text: str) -> ParsedPage:
         if _DELIM_RE.match(lines[i].rstrip("\r")):
             fm_text = "\n".join(lines[1:i])
             body = "\n".join(lines[i + 1:])
-            loader = _DupKeyLoader(fm_text)
+            loader = None
             try:
+                loader = _DupKeyLoader(fm_text)
                 meta = loader.get_single_data()
-            except (yaml.YAMLError, ValueError) as e:
-                return ParsedPage(None, body, fm_text, str(e), had_bom=had_bom)
+            except Exception as e:
+                # PyYAML constructors can raise non-YAML errors for malformed explicit tags.
+                error = f"YAML parse error ({type(e).__name__}): {e}"
+                return ParsedPage(None, body, fm_text, error, had_bom=had_bom)
             finally:
-                loader.dispose()
+                if loader is not None:
+                    loader.dispose()
             dupes = getattr(loader, "duplicate_keys", [])
             if meta is None:
                 meta = {}

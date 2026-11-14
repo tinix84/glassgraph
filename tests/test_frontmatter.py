@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import textwrap
+import pytest
 
 
 def _fm(name="frontmatter"):
@@ -25,6 +26,20 @@ PAGE = textwrap.dedent("""\
     ---
     Body text here.
 """)
+
+
+@pytest.mark.parametrize("value", ["!!bool maybe", "!!timestamp wrong", "!!int ''"])
+def test_constructor_failures_are_parse_errors(value):
+    parsed = _fm().parse(f"---\nfield: {value}\n---\nBody.\n")
+    assert parsed.metadata is None and parsed.error
+    assert parsed.body == "Body.\n"
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x7f", "\ufffe"])
+def test_reader_failures_are_parse_errors(control):
+    parsed = _fm().parse(f"---\nfield: bad{control}\n---\nBody.\n")
+    assert parsed.metadata is None and parsed.error
+    assert parsed.body == "Body.\n"
 
 
 def test_parse_basic():

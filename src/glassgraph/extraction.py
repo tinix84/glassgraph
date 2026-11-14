@@ -56,6 +56,24 @@ def disambiguation_path(config: VaultConfig) -> Path:
     return path
 
 
+def relink(config: VaultConfig, source: str | Path) -> str:
+    """Return a full-file relinking preview without changing the source."""
+    from glassgraph.core import frontmatter, relink as transformer
+
+    selected = resolve_source(config, source)
+    if selected.is_relative_to(config.raw) or not selected.is_relative_to(config.wiki / "sources"):
+        raise ConfigError("Select a curated Markdown source under wiki/sources")
+    with selected.open(encoding="utf-8", newline="") as stream:
+        text = stream.read()
+    parsed = frontmatter.parse(text)
+    if parsed.error:
+        raise ConfigError("Read valid source frontmatter before previewing relinking")
+    patterns = linker._load_disambiguation(disambiguation_path(config), strict=True)
+    automaton, _, _ = index.compile_index(config.wiki, config=config)
+    prefix = text[:len(text) - len(parsed.body)]
+    return prefix + transformer.relink_bullets(parsed.body, automaton, patterns)
+
+
 def suggest(config: VaultConfig, source: str | Path, *, top_n: int = 20) -> str:
     """Propose current alias candidates without reading or writing caches."""
     from glassgraph.core import suggest as ranker

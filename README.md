@@ -53,6 +53,7 @@ The package exposes these portable commands:
 - Explanation
 - Alias suggestions
 - Alias lookup
+- Source relinking previews
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
@@ -200,6 +201,26 @@ Custom folders use the selected page's declared entity type. An unsupported or m
 Lookup takes the alias and declared type from one parse of the owner page.
 Exit codes are `0` for found and `1` for not found. Invalid configuration or a read error returns `2`.
 Lookup does not add aliases or create wiki pages.
+
+### Preview source relinking
+
+```powershell
+glassgraph --root 'D:\vault' relink wiki/sources/example.md
+python -m glassgraph relink wiki/sources/example.md
+```
+
+Relinking prints the complete proposed source text. It does not write the page or create derived state.
+It accepts curated Markdown under the configured wiki/sources directory. Raw inputs are rejected.
+It uses current aliases and optional `.glassgraph/index/disambiguation.yaml` rules.
+The preview preserves the source's frontmatter prefix and BOM. It also preserves line endings and unrelated text.
+No apply option is provided. Review each proposal before making a source edit.
+
+The body transformation preserves the legacy primitive's behavior.
+It wraps entity mentions in Key-extractions subsection bullet descriptions.
+It skips the bullet subject and existing wikilinks. Alias surfaces use piped links.
+The primitive retains its existing heading and fenced-text behavior. It is not a general Markdown editor.
+Repeated application is idempotent.
+Exit code `0` means a preview was produced, including an unchanged preview. Invalid input or a read error returns `2`.
 
 ### Run the existing linker
 

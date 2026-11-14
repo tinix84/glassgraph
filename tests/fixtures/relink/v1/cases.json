@@ -1,0 +1,28 @@
+[
+  {
+    "name": "basic",
+    "body": "## Key extractions\n\n### Companies mentioned\n- [[Tesla]] — BYD uses SiC MOSFET and 特斯拉.\n- [[BYD]] — 特斯拉 uses SiC MOSFET.\n",
+    "patterns": [],
+    "expected": "## Key extractions\n\n### Companies mentioned\n- [[Tesla]] — [[BYD]] uses [[SiC-MOSFET|SiC MOSFET]] and 特斯拉.\n- [[BYD]] — [[Tesla|特斯拉]] uses [[SiC-MOSFET|SiC MOSFET]].\n"
+  },
+  {
+    "name": "boundaries",
+    "body": "## TL;DR\n- SiC MOSFET stays outside.\n\n## Key extractions\n### Technologies mentioned\n- [[BYD]] — Tesla uses SiC MOSFET.\n```\n- [[BYD]] — Tesla in a fence.\n```\n## Quality verdict\n- Tesla stays outside.\n",
+    "patterns": [],
+    "expected": "## TL;DR\n- SiC MOSFET stays outside.\n\n## Key extractions\n### Technologies mentioned\n- [[BYD]] — [[Tesla]] uses [[SiC-MOSFET|SiC MOSFET]].\n```\n- [[BYD]] — [[Tesla]] in a fence.\n```\n## Quality verdict\n- Tesla stays outside.\n"
+  },
+  {
+    "name": "existing",
+    "body": "## Key extractions\n### Companies mentioned\n- [[BYD|BYD company]] — [[Tesla]] and [[SiC-MOSFET|SiC MOSFET]] remain linked; BYD is the subject.\n",
+    "patterns": [],
+    "expected": "## Key extractions\n### Companies mentioned\n- [[BYD|BYD company]] — [[Tesla]] and [[SiC-MOSFET|SiC MOSFET]] remain linked; BYD is the subject.\n"
+  },
+  {
+    "name": "suppressed",
+    "body": "## Key extractions\n### Companies mentioned\n- [[BYD]] — Tesla coil and Tesla cars.\n",
+    "patterns": [
+      "tesla coil"
+    ],
+    "expected": "## Key extractions\n### Companies mentioned\n- [[BYD]] — Tesla coil and [[Tesla]] cars.\n"
+  }
+]
