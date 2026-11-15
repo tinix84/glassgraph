@@ -134,6 +134,9 @@ def test_apply_and_dry_run_are_exclusive(tmp_path):
     ("source", "wiki/companies/Source.md"),
     ("source", "wiki/sources/nested/Source.md"),
     ("source", "wiki/Source.md"),
+    ("company", "wiki/themes/companies/Acme.md"),
+    ("source", "wiki/x/sources/Source.md"),
+    ("technology", "wiki/COMPANIES/Widget.md"),
 ])
 def test_folder_type_mismatch_refused(tmp_path, capsys, page_type, target):
     vault(tmp_path)
@@ -145,8 +148,16 @@ def test_folder_type_mismatch_refused(tmp_path, capsys, page_type, target):
     assert snapshot(tmp_path) == before
 
 
+@pytest.mark.parametrize("folder", ["Companies", "COMPANIES"])
+def test_pages_use_the_configured_folder_spelling(tmp_path, capsys, folder):
+    vault(tmp_path)
+    inputs(tmp_path, META["company"])
+    assert apply(tmp_path, "company", f"wiki/{folder}/Acme.md") == 0
+    assert capsys.readouterr().out == "written | wiki/companies/Acme.md\n"
+    assert [p.name for p in (tmp_path / "wiki").iterdir()] == ["companies"]
+
+
 @pytest.mark.parametrize("config, page_type, target, status", [
-    ("", "company", "wiki/Companies/Acme.md", 0),
     ("", "market", "wiki/markets/Example.md", 0),
     ('[paths]\nentity_dirs=["companies","notes"]\n', "theme", "wiki/notes/Example.md", 0),
     ('[paths]\nentity_dirs=["companies","notes"]\n', "company", "wiki/notes/Acme.md", 0),
@@ -249,29 +260,44 @@ def test_failed_write_leaves_no_partial_page(tmp_path, capsys, monkeypatch, over
     def fail(*args):
         raise OSError("simulated failure")
 
-    monkeypatch.setattr(writer.os, "replace" if overwrite else "link", fail)
+    if overwrite:
+        monkeypatch.setattr(writer.os, "replace", fail)
+    else:
+        monkeypatch.setattr(writer, "_move_new", fail)
     extra = ["--overwrite"] if overwrite else []
     assert apply(tmp_path, "company", "wiki/companies/Acme.md", *extra) == 2
     captured = capsys.readouterr()
     assert not captured.out and "simulated failure" in captured.err
-    page = tmp_path / "wiki/companies/Acme.md"
-    assert page.read_bytes() == original if overwrite else not page.exists()
+    if overwrite:
+        assert (tmp_path / "wiki/companies/Acme.md").read_bytes() == original
+    else:
+        assert not (tmp_path / "wiki").exists()
     assert temporary_files(tmp_path) == []
 
 
-def test_new_target_is_not_clobbered_by_a_concurrent_page(tmp_path, capsys, monkeypatch):
+@pytest.mark.parametrize("extra", [[], ["--overwrite"]])
+def test_new_target_is_not_clobbered_by_a_concurrent_page(tmp_path, capsys, monkeypatch, extra):
     vault(tmp_path)
     inputs(tmp_path, META["company"])
-    real_link = os.link
+    real_move = writer._move_new
 
     def racing(source, destination):
         Path(destination).write_text("concurrent page", encoding="utf-8")
-        return real_link(source, destination)
+        return real_move(source, destination)
 
-    monkeypatch.setattr(writer.os, "link", racing)
-    assert apply(tmp_path, "company", "wiki/companies/Acme.md") == 3
+    monkeypatch.setattr(writer, "_move_new", racing)
+    assert apply(tmp_path, "company", "wiki/companies/Acme.md", *extra) == 3
     assert "ADMISSION REFUSED" in capsys.readouterr().err
     assert (tmp_path / "wiki/companies/Acme.md").read_text(encoding="utf-8") == "concurrent page"
+    assert temporary_files(tmp_path) == []
+
+
+def test_long_target_names_are_written(tmp_path):
+    vault(tmp_path)
+    inputs(tmp_path, META["source"])
+    target = "wiki/sources/" + "x" * 240 + ".md"
+    assert apply(tmp_path, "source", target) == 0
+    assert (tmp_path / target).is_file()
     assert temporary_files(tmp_path) == []
 
 

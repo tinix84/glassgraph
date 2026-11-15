@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -64,7 +65,7 @@ def render_page(page_type: str, meta: dict, body: str) -> tuple[str, list[str]]:
 
 
 def write_page(path: Path, page_type: str, meta: dict, body: str) -> list[str]:
-    """Preserve the legacy writer API. Portable CLI callers use preview instead."""
+    """Preserve the legacy writer API. Portable CLI callers use preview or apply instead."""
     text, warnings = render_page(page_type, meta, body)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
@@ -124,19 +125,28 @@ def _relative(config: VaultConfig, page: Path) -> str:
     return page.resolve().relative_to(config.root).as_posix()
 
 
-def _folder_reasons(config: VaultConfig, target: Path, page_type: str) -> list[str]:
+def _canonical_target(config: VaultConfig, target: Path, page_type: str) -> tuple[Path, list[str]]:
+    """Return the target in the configured folder spelling, or the folder refusal reasons."""
     folder = target.parent
     name = folder.name.casefold()
     if folder.parent != config.wiki:
-        return ["Place the page directly in the sources folder or a configured entity folder"]
+        return target, ["Place the page directly in the sources folder or a configured entity folder"]
     if page_type == "source":
-        return [] if name == "sources" else ["Place source pages directly in the sources folder"]
-    if name not in {entity_dir.casefold() for entity_dir in config.entity_dirs}:
-        return [f"Place {page_type} pages directly in a configured entity folder"]
-    known = ENTITY_TYPES.get(name)
-    if known is not None and known != page_type:
-        return [f"The {folder.name} folder accepts only {known} pages"]
-    return []
+        if name != "sources":
+            return target, ["Place source pages directly in the sources folder"]
+        spelling = "sources"
+    else:
+        spelling = next((d for d in config.entity_dirs if d.casefold() == name), None)
+        if spelling is None:
+            return target, [f"Place {page_type} pages directly in a configured entity folder"]
+        known = ENTITY_TYPES.get(name)
+        if known is not None and known != page_type:
+            return target, [f"The {folder.name} folder accepts only {known} pages"]
+    # Scanners read only the configured spelling. A case-sensitive filesystem must not get a second folder.
+    canonical = config.wiki / spelling / target.name
+    if not config.allows(canonical):
+        raise ConfigError("Select a target outside excluded directories")
+    return canonical, []
 
 
 def _alias_reasons(config: VaultConfig, target: Path, meta: dict) -> list[str]:
@@ -175,11 +185,16 @@ def _source_url_reasons(config: VaultConfig, meta: dict) -> tuple[list[str], lis
 
 
 def admit(config: VaultConfig, target: Path, page_type: str, meta: dict, *,
-          overwrite: bool = False) -> list[str]:
-    """Return admission warnings, or raise AdmissionError with every refusal reason."""
-    reasons = _folder_reasons(config, target, page_type)
+          overwrite: bool = False) -> tuple[Path, bool, list[str]]:
+    """Admit a resolved absolute target, or raise AdmissionError with every refusal reason.
+
+    Return the target in the configured folder spelling, whether it exists, and warnings.
+    Alias and source_url checks apply only to new pages. An overwrite skips them.
+    """
+    target, reasons = _canonical_target(config, target, page_type)
     warnings: list[str] = []
-    if target.exists():
+    exists = target.exists()
+    if exists:
         if not overwrite:
             reasons.append("The target exists. Use --overwrite to replace it")
     elif page_type == "source":
@@ -189,25 +204,46 @@ def admit(config: VaultConfig, target: Path, page_type: str, meta: dict, *,
         reasons += _alias_reasons(config, target, meta)
     if reasons:
         raise AdmissionError(reasons)
-    return warnings
+    return target, exists, warnings
 
 
-def _store(target: Path, text: str, *, overwrite: bool) -> None:
-    """Move a complete temporary file into place, without replacing a new page."""
+def _move_new(source: Path, target: Path) -> None:
+    """Move a file into place. Raise FileExistsError if the target exists."""
+    if os.name == "nt":
+        os.rename(source, target)  # Windows rename never replaces an existing file.
+    else:
+        os.link(source, target)  # POSIX rename replaces a file. A hard link does not.
+
+
+def _store(target: Path, text: str, *, replace: bool) -> None:
+    """Write a complete, synced temporary file, then move it into place.
+
+    Without replace, a page that appears during the write is kept. A failure removes
+    the temporary file and the folders that this call created.
+    """
+    created = [folder for folder in (target.parent, *target.parent.parents) if not folder.exists()]
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp"
+    # A short fixed name keeps long target names inside the filename length limit.
+    temporary = target.parent / f".gg-{secrets.token_hex(8)}.tmp"
     try:
         with temporary.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
-        if overwrite:
+            handle.flush()
+            os.fsync(handle.fileno())
+        if replace:
             os.replace(temporary, target)
         else:
             try:
-                os.link(temporary, target)
+                _move_new(temporary, target)
             except FileExistsError:
                 raise AdmissionError(["The target appeared during the write. Nothing was replaced"]) from None
-    finally:
+    except BaseException:
         temporary.unlink(missing_ok=True)
+        for folder in created:
+            with contextlib.suppress(OSError):
+                folder.rmdir()
+        raise
+    temporary.unlink(missing_ok=True)
 
 
 def apply(config: VaultConfig, target: str | Path, page_type: str, meta_path: str | Path,
@@ -215,9 +251,9 @@ def apply(config: VaultConfig, target: str | Path, page_type: str, meta_path: st
     """Render, admit, and write one configured wiki page. Return its path and warnings."""
     selected = _target(config, target)
     meta, text, warnings = _render_inputs(config, page_type, meta_path, body_path)
-    warnings = warnings + admit(config, selected, page_type, meta, overwrite=overwrite)
-    _store(selected, text, overwrite=overwrite)
-    return selected, warnings
+    selected, exists, admitted = admit(config, selected, page_type, meta, overwrite=overwrite)
+    _store(selected, text, replace=exists)
+    return selected, warnings + admitted
 
 
 def main() -> None:

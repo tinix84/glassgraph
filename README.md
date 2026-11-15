@@ -68,7 +68,7 @@ See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the c
 glassgraph --root 'D:\vault' write-page --type company --path wiki/companies/Acme.md --meta meta.json --body body.md --dry-run
 ```
 
-The command prints the complete proposed page to stdout. It writes no page, cache, report, or state file.
+By default, the command prints the complete proposed page to stdout. A preview writes no page, cache, report, or state file.
 Preview is the default. `--dry-run` makes that choice explicit. `--apply` writes the page (see below).
 Warnings go to stderr. Exit codes are 0 for a valid preview, 1 for schema errors, and 2 for input/configuration errors.
 Errors produce no partial page text on stdout.
@@ -90,11 +90,13 @@ glassgraph write-page --type company --path wiki/companies/Acme.md --meta meta.j
 `--apply` writes the rendered page after these admission checks. A failed check writes nothing.
 
 1. An existing target needs `--overwrite`. `--overwrite` is accepted only with `--apply`.
-2. A source page goes directly in `sources/`. An entity page goes directly in a configured entity folder. A known folder name sets the only accepted type. A custom folder accepts any entity type.
+2. A source page goes directly in `sources/`. An entity page goes directly in a configured entity folder. A known folder name sets the only accepted type. A custom folder accepts any entity type. The page goes in the configured folder spelling.
 3. A new entity page cannot use a name or alias that already resolves to another page, with the same rules as `lookup`.
 4. A new source page cannot use a `source_url` that another source page uses. Unparsable source pages are skipped with a warning.
 
-The command writes only the target page, as UTF-8 with LF newlines. It writes a temporary file first, so a failed write leaves no partial page. A new page that appears during the write is not replaced.
+Checks 3 and 4 apply only to new pages. An `--overwrite` skips them, so it can add an alias that another page owns.
+
+The command writes only the target page, as UTF-8 with LF newlines. It writes and syncs a temporary file first. A failed write leaves no partial page and removes the folders it created. A new page that appears during the write is not replaced.
 On success, stdout gives `written | <vault-relative target>`. Exit codes are 0 for a written page, 1 for schema errors, 2 for input/configuration/write errors, and 3 for an admission refusal.
 Runtime-state migration remains separate.
 
