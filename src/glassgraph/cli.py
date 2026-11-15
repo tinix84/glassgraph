@@ -48,31 +48,48 @@ def main(argv: list[str] | None = None) -> int:
     index_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     hook_parser = commands.add_parser("hook", help="Validate proposed wiki Write/Edit content from stdin")
     hook_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
-    page_parser = commands.add_parser("write-page", help="Preview a validated page without writing it")
+    page_parser = commands.add_parser("write-page", help="Preview, or apply with admission checks, a validated page")
     page_parser.add_argument("--root", default=argparse.SUPPRESS, help="Vault directory")
     from glassgraph.wiki import schema
     page_parser.add_argument("--type", required=True, choices=schema.PAGE_TYPES)
-    page_parser.add_argument("--path", required=True, help="Proposed Markdown target in the configured wiki")
+    page_parser.add_argument("--path", required=True, help="Markdown target in the configured wiki")
     page_parser.add_argument("--meta", required=True, help="Metadata JSON file")
     page_parser.add_argument("--body", required=True, help="Markdown body file")
-    page_parser.add_argument("--dry-run", action="store_true", help="Preview only (also the default)")
+    page_mode = page_parser.add_mutually_exclusive_group()
+    page_mode.add_argument("--dry-run", action="store_true", help="Preview only (also the default)")
+    page_mode.add_argument("--apply", action="store_true", help="Write the page after admission checks")
+    page_parser.add_argument("--overwrite", action="store_true", help="Let --apply replace an existing page")
     args = parser.parse_args(argv)
     if args.command == "hook":
         from glassgraph.wiki.hook import from_stdin
         return from_stdin(args.root)
+    if args.command == "write-page" and args.overwrite and not args.apply:
+        page_parser.error("--overwrite requires --apply")
     try:
         config = load_config(args.root)
         if args.command == "write-page":
-            from glassgraph.wiki.write_page import ValidationError, preview
+            from glassgraph.wiki.write_page import AdmissionError, ValidationError, apply, preview
             try:
-                text, warnings = preview(config, args.path, args.type, args.meta, args.body)
+                if args.apply:
+                    target, warnings = apply(config, args.path, args.type, args.meta, args.body,
+                                             overwrite=args.overwrite)
+                else:
+                    text, warnings = preview(config, args.path, args.type, args.meta, args.body)
             except ValidationError as error:
                 print("VALIDATION FAILED — nothing written:", file=sys.stderr)
                 for message in error.errors:
                     print(f"  - {message}", file=sys.stderr)
                 return 1
+            except AdmissionError as error:
+                print("ADMISSION REFUSED — nothing written:", file=sys.stderr)
+                for message in error.reasons:
+                    print(f"  - {message}", file=sys.stderr)
+                return 3
             for warning in warnings:
                 print(f"WARN: {warning}", file=sys.stderr)
+            if args.apply:
+                print(f"written | {target.relative_to(config.root).as_posix()}")
+                return 0
             if hasattr(sys.stdout, "reconfigure"):
                 sys.stdout.reconfigure(newline="")
             sys.stdout.write(text)
