@@ -312,6 +312,22 @@ def test_failed_write_leaves_no_partial_page(tmp_path, capsys, monkeypatch, over
     assert temporary_files(tmp_path) == []
 
 
+def test_partial_folder_creation_is_removed(tmp_path, capsys, monkeypatch):
+    vault(tmp_path)
+    inputs(tmp_path, META["company"])
+    real_mkdir = os.mkdir
+
+    def fail_second_level(path, *args, **kwargs):
+        if Path(path).name == "companies":
+            raise OSError("simulated mkdir failure")
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", fail_second_level)
+    assert apply(tmp_path, "company", "wiki/companies/Acme.md") == 2
+    assert "simulated mkdir failure" in capsys.readouterr().err
+    assert not (tmp_path / "wiki").exists()
+
+
 @pytest.mark.parametrize("extra", [[], ["--overwrite"]])
 def test_new_target_is_not_clobbered_by_a_concurrent_page(tmp_path, capsys, monkeypatch, extra):
     vault(tmp_path)
