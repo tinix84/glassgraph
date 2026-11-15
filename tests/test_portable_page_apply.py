@@ -249,6 +249,43 @@ def test_scope_errors_return_two_without_write(tmp_path, capsys, target):
     assert snapshot(tmp_path) == before
 
 
+CASEFOLD_DIRS = '[paths]\nentity_dirs=["companies","straße"]\n'
+
+
+def link_folder(link, target):
+    """Create a directory symlink, or a Windows junction, or skip."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        except (ImportError, OSError):
+            pytest.skip("Directory links unavailable")
+
+
+def test_configured_spelling_is_checked_for_exclusions(tmp_path, capsys):
+    vault(tmp_path, CASEFOLD_DIRS + 'exclude=["wiki/straße"]\n')
+    inputs(tmp_path, META["company"])
+    before = snapshot(tmp_path)
+    assert apply(tmp_path, "company", "wiki/STRASSE/Acme.md") == 2
+    assert not capsys.readouterr().out
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("destination", ["raw", "wiki/sources"])
+def test_configured_spelling_link_cannot_redirect_the_write(tmp_path, capsys, destination):
+    config = vault(tmp_path, CASEFOLD_DIRS)
+    inputs(tmp_path, META["company"])
+    (tmp_path / destination).mkdir(parents=True)
+    config.wiki.mkdir(exist_ok=True)
+    link_folder(config.wiki / "straße", tmp_path / destination)
+    before = snapshot(tmp_path)
+    assert apply(tmp_path, "company", "wiki/STRASSE/Escape.md") == 2
+    assert not capsys.readouterr().out
+    assert snapshot(tmp_path) == before
+
+
 @pytest.mark.parametrize("overwrite", [False, True])
 def test_failed_write_leaves_no_partial_page(tmp_path, capsys, monkeypatch, overwrite):
     vault(tmp_path)

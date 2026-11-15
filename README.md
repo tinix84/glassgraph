@@ -94,7 +94,8 @@ glassgraph write-page --type company --path wiki/companies/Acme.md --meta meta.j
 3. A new entity page cannot use a name or alias that already resolves to another page, with the same rules as `lookup`.
 4. A new source page cannot use a `source_url` that another source page uses. Unparsable source pages are skipped with a warning.
 
-Checks 3 and 4 apply only to new pages. An `--overwrite` skips them, so it can add an alias that another page owns.
+Checks 3 and 4 apply only to new pages. Replacing an existing page skips them, so it can add an alias that another page owns.
+A request in a different folder spelling must resolve to the configured folder. A link that leads elsewhere is refused.
 
 The command writes only the target page, as UTF-8 with LF newlines. It writes and syncs a temporary file first. A failed write leaves no partial page and removes the folders it created. A new page that appears during the write is not replaced.
 On success, stdout gives `written | <vault-relative target>`. Exit codes are 0 for a written page, 1 for schema errors, 2 for input/configuration/write errors, and 3 for an admission refusal.

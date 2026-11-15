@@ -143,9 +143,11 @@ def _canonical_target(config: VaultConfig, target: Path, page_type: str) -> tupl
         if known is not None and known != page_type:
             return target, [f"The {folder.name} folder accepts only {known} pages"]
     # Scanners read only the configured spelling. A case-sensitive filesystem must not get a second folder.
-    canonical = config.wiki / spelling / target.name
-    if not config.allows(canonical):
-        raise ConfigError("Select a target outside excluded directories")
+    # The rebuilt path can be a different directory or a link, so repeat the target checks on it.
+    folder = config.wiki / spelling
+    canonical = _target(config, folder / target.name)
+    if canonical.parent != folder:
+        raise ConfigError(f"Keep the {spelling} folder a plain folder inside the configured wiki")
     return canonical, []
 
 
@@ -189,7 +191,7 @@ def admit(config: VaultConfig, target: Path, page_type: str, meta: dict, *,
     """Admit a resolved absolute target, or raise AdmissionError with every refusal reason.
 
     Return the target in the configured folder spelling, whether it exists, and warnings.
-    Alias and source_url checks apply only to new pages. An overwrite skips them.
+    Alias and source_url checks apply only to new pages. Replacing an existing page skips them.
     """
     target, reasons = _canonical_target(config, target, page_type)
     warnings: list[str] = []
@@ -222,10 +224,10 @@ def _store(target: Path, text: str, *, replace: bool) -> None:
     the temporary file and the folders that this call created.
     """
     created = [folder for folder in (target.parent, *target.parent.parents) if not folder.exists()]
-    target.parent.mkdir(parents=True, exist_ok=True)
     # A short fixed name keeps long target names inside the filename length limit.
     temporary = target.parent / f".gg-{secrets.token_hex(8)}.tmp"
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         with temporary.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
