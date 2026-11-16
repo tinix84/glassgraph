@@ -15,6 +15,23 @@ GOOD = "---\ntype: company\n---\nBody.\n"
 DUP = "---\ntype: company\ntype: company\n---\nBody.\n"
 
 
+@pytest.fixture(autouse=True)
+def no_environment_root(monkeypatch):
+    monkeypatch.delenv("GLASSGRAPH_ROOT", raising=False)
+
+
+def link_directory(link, target):
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except OSError:
+        pass
+    if os.name != "nt":
+        pytest.skip("Directory links unavailable")
+    import _winapi
+    _winapi.CreateJunction(str(target), str(link))
+
+
 def vault(root, config=""):
     marker = root / ".glassgraph"
     marker.mkdir(parents=True)
@@ -145,10 +162,61 @@ def test_installed_entry_and_discovery(tmp_path, entry, mode):
 
 
 def test_missing_marker_and_bad_config(tmp_path, monkeypatch):
-    monkeypatch.delenv("GLASSGRAPH_ROOT", raising=False)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
     assert hook.run(payload(tmp_path / "wiki/Acme.md")) == 2
+    assert hook.run(payload(tmp_path / "wiki/Acme.md", cwd=str(work))) == 2
+    assert hook.run(payload(tmp_path / "wiki/Acme.md", cwd=str(tmp_path / "absent"))) == 2
     vault(tmp_path, "bad = [")
     assert hook.run(payload(tmp_path / "wiki/Acme.md")) == 2
+
+
+def test_target_outside_every_vault_passes_from_a_session_vault(tmp_path, monkeypatch):
+    root = vault(tmp_path / "vault")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (root / "wiki/new").mkdir(parents=True)
+    monkeypatch.chdir(scratch)
+    before = snapshot(tmp_path)
+    for target in (scratch / "Plan.md", scratch / "new/deeper/Plan.md", tmp_path / "other/wiki/Acme.md"):
+        assert hook.run(payload(target, DUP, cwd=str(root))) == 0
+        assert hook.run(payload(target, DUP, cwd=str(root / "wiki/new"))) == 0
+        assert hook.run(payload(target, DUP), root) == 0
+    assert hook.run(payload(root / "wiki/Acme.md", DUP, cwd=str(scratch))) == 2
+    assert snapshot(tmp_path) == before
+
+
+def test_wiki_link_to_a_folder_outside_every_vault_blocks(tmp_path):
+    root = vault(tmp_path / "vault")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "wiki").mkdir()
+    link_directory(root / "wiki/ext", outside)
+    for name in ("ext/Acme.md", "ext/a/b/Acme.md"):
+        for cwd in (root, outside):
+            assert hook.run(payload(root / "wiki" / name, GOOD, cwd=str(cwd))) == 2
+    assert list(outside.iterdir()) == []
+
+
+def test_target_outside_every_vault_checks_the_session_config(tmp_path):
+    root = vault(tmp_path / "vault", "bad = [")
+    assert hook.run(payload(tmp_path / "scratch/Plan.md", cwd=str(root))) == 2
+
+
+def test_installed_hook_passes_out_of_vault_target(tmp_path):
+    root = vault(tmp_path / "vault")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("GLASSGRAPH_ROOT", None)
+    for cwd, expected in ((root, 0), (scratch, 2)):
+        result = subprocess.run([sys.executable, "-m", "glassgraph.wiki.hook"],
+                                input=json.dumps(payload(scratch / "Plan.md", DUP, cwd=str(cwd))),
+                                text=True, capture_output=True, env=env, cwd=scratch)
+        assert result.returncode == expected, result.stderr
+        assert "Traceback" not in result.stderr
 
 
 def test_cli_and_malformed_json(tmp_path, monkeypatch):

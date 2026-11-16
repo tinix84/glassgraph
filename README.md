@@ -93,6 +93,9 @@ python -m glassgraph.wiki.hook
 `glassgraph hook` accepts the same JSON payload on standard input. Both commands accept `--root PATH`.
 Without a flag or `GLASSGRAPH_ROOT`, discovery starts at the target parent, including for new nested paths.
 Relative targets use the payload's absolute `cwd`, or the process working directory when absent.
+If no vault marker is above the target, discovery starts at that `cwd`, and that vault's wiki scope applies.
+A target outside it is permitted, a link out of its wiki is blocked, and no vault or an invalid configuration blocks.
+So a user-level registration blocks Markdown writes outside every vault when the session is not in a vault.
 
 The hook checks Markdown recursively inside the configured wiki. It honors exclusions and ignores `.archive` paths.
 The legacy exempt basenames are `index.md`, `log.md`, and `overview.md`.
@@ -120,6 +123,7 @@ Root resolution uses this order:
 
 An invalid explicit or environment root is an error. Discovery never uses the code checkout's location.
 The shared `discover_root(start=...)` interface also accepts a target file's parent directory for hook integration.
+When upward discovery finds no marker, it raises `RootNotFoundError`, a `ConfigError` subclass.
 
 The optional `<vault>/.glassgraph/config.toml` file supports:
 

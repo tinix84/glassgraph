@@ -20,6 +20,10 @@ class ConfigError(ValueError):
     """Report an invalid vault root or configuration."""
 
 
+class RootNotFoundError(ConfigError):
+    """Report that upward discovery found no vault marker."""
+
+
 def discover_root(root: str | Path | None = None, *, start: Path | None = None) -> Path:
     """Resolve an explicit root, environment root, or nearest upward marker."""
     selected = root if root is not None else os.environ.get("GLASSGRAPH_ROOT")
@@ -36,7 +40,7 @@ def discover_root(root: str | Path | None = None, *, start: Path | None = None) 
     for candidate in (current, *current.parents):
         if (candidate / ".glassgraph").is_dir():
             return candidate
-    raise ConfigError("Select --root PATH, set GLASSGRAPH_ROOT, or add a .glassgraph directory")
+    raise RootNotFoundError("Select --root PATH, set GLASSGRAPH_ROOT, or add a .glassgraph directory")
 
 
 def _inside(root: Path, value: str) -> Path:
