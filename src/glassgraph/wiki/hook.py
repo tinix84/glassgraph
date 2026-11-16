@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from glassgraph.config import ConfigError, load_config
+from glassgraph.config import ConfigError, RootNotFoundError, load_config
 from glassgraph.core import frontmatter
 
 EXEMPT_NAMES = {"index.md", "log.md", "overview.md"}
@@ -69,22 +69,26 @@ def check(content: str) -> list[str]:
     return errors
 
 
-def _target(data: dict, tool_input: dict) -> Path:
+def _target(data: dict, tool_input: dict) -> tuple[Path, Path]:
     value = tool_input.get("file_path", "")
     cwd = data.get("cwd", str(Path.cwd()))
     if not isinstance(value, str) or not value or "\0" in value:
         raise ConfigError("Supply a nonempty file_path")
     if not isinstance(cwd, str) or not cwd or "\0" in cwd or not Path(cwd).is_absolute():
         raise ConfigError("Supply an absolute payload cwd")
-    return Path(cwd) / value
+    return Path(cwd) / value, Path(cwd)
 
 
-def _in_scope(path: Path, root: str | Path | None) -> bool:
+def _in_scope(path: Path, root: str | Path | None, cwd: Path) -> bool:
     # New Write targets can have parents that do not exist yet.
     start = path.absolute().parent
     while not start.exists() and start != start.parent:
         start = start.parent
-    config = load_config(root, start=start)
+    try:
+        config = load_config(root, start=start)
+    except RootNotFoundError:
+        # No vault owns the target: apply the session vault's scope, or fail closed.
+        config = load_config(root, start=cwd)
     lexical = path.absolute()
     resolved = path.resolve()
     if not lexical.is_relative_to(config.wiki) and not resolved.is_relative_to(config.wiki):
@@ -111,14 +115,14 @@ def run(data: object, root: str | Path | None = None, *, legacy: bool = False) -
                 raise ConfigError("Supply a string file_path")
             path = Path(value)
         else:
-            path = _target(data, tool_input)
+            path, cwd = _target(data, tool_input)
         if path.suffix.lower() != ".md" or path.name in EXEMPT_NAMES:
             return 0
         if legacy:
             parts = {part.lower() for part in path.parts}
             scoped = "wiki" in parts and ".archive" not in parts
         else:
-            scoped = _in_scope(path, root)
+            scoped = _in_scope(path, root, cwd)
         if not scoped:
             return 0
         content = resulting_content(data["tool_name"], {**tool_input, "file_path": str(path)})
