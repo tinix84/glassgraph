@@ -144,8 +144,12 @@ def run(data: object, root: str | Path | None = None, *, legacy: bool = False) -
 
 def from_stdin(root: str | Path | None = None, *, legacy: bool = False) -> int:
     """Read the hook envelope and return the admission status."""
+    # The envelope is UTF-8 JSON. Read bytes so the console code page cannot corrupt it.
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
     try:
-        data = json.load(sys.stdin)
+        data = json.loads(stream.read())
     except (ValueError, UnicodeError):
         return 0
     return run(data, root, legacy=legacy)

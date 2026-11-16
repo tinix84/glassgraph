@@ -219,6 +219,29 @@ def test_installed_hook_passes_out_of_vault_target(tmp_path):
         assert "Traceback" not in result.stderr
 
 
+@pytest.mark.parametrize("stdin_encoding", [None, "cp1252:surrogateescape"])
+def test_hook_decodes_utf8_envelope_independent_of_console(tmp_path, stdin_encoding):
+    root = vault(tmp_path / "vault")
+    (root / "wiki").mkdir()
+    env = os.environ.copy()
+    env.pop("GLASSGRAPH_ROOT", None)
+    env.pop("PYTHONUTF8", None)
+    env.pop("PYTHONIOENCODING", None)
+    env["PYTHONPATH"] = str(Path(hook.__file__).parents[2])
+    if stdin_encoding:
+        env["PYTHONIOENCODING"] = stdin_encoding
+    content = '---\ntype: company\nsources:\n  - "均流电路原理——下垂控制法.md"\n---\nBody.\n'
+    for text, expected in ((content, 0), (content.replace("type: company\n", "type: company\ntype: company\n"), 2)):
+        envelope = json.dumps(payload(root / "wiki/Acme.md", text, cwd=str(root)), ensure_ascii=False)
+        result = subprocess.run([sys.executable, "-m", "glassgraph.wiki.hook"], input=envelope.encode("utf-8"),
+                                capture_output=True, env=env, cwd=root)
+        stderr = result.stderr.decode("utf-8", "replace")
+        assert result.returncode == expected, stderr
+        assert "Traceback" not in stderr
+        assert "unacceptable character" not in stderr
+        assert expected == 0 or "WIKI WRITE BLOCKED —" in stderr
+
+
 def test_cli_and_malformed_json(tmp_path, monkeypatch):
     vault(tmp_path)
     monkeypatch.setattr(sys, "stdin", io.StringIO("{"))
