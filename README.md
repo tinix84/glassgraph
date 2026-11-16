@@ -57,7 +57,7 @@ The package exposes these portable commands:
 - Co-occurrence cluster reports
 - Wiki catalog generation
 - Write/Edit frontmatter validation hook
-- Validated page rendering previews
+- Validated page rendering previews and admitted page writes
 
 Other scripts retain their entry points during incremental migration.
 See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the consolidation decision.
@@ -68,8 +68,8 @@ See [ADR-0018](docs/adr/ADR-0018-incremental-package-consolidation.md) for the c
 glassgraph --root 'D:\vault' write-page --type company --path wiki/companies/Acme.md --meta meta.json --body body.md --dry-run
 ```
 
-The command prints the complete proposed page to stdout. It writes no page, cache, report, or state file.
-Preview is the default. `--dry-run` makes that choice explicit. There is no apply option.
+By default, the command prints the complete proposed page to stdout. A preview writes no page, cache, report, or state file.
+Preview is the default. `--dry-run` makes that choice explicit. `--apply` writes the page (see below).
 Warnings go to stderr. Exit codes are 0 for a valid preview, 1 for schema errors, and 2 for input/configuration errors.
 Errors produce no partial page text on stdout.
 
@@ -80,7 +80,26 @@ Existing target content remains unchanged.
 
 The renderer preserves the legacy field order, alias union, Unicode serialization, relation body hash, and writer-schema warnings.
 The legacy `write_page.py` adapter retains direct-write behavior through the same renderer.
-Portable apply behavior and runtime-state migration remain separate.
+
+### Write a validated page
+
+```powershell
+glassgraph write-page --type company --path wiki/companies/Acme.md --meta meta.json --body body.md --apply
+```
+
+`--apply` writes the rendered page after these admission checks. A failed check writes nothing.
+
+1. An existing target needs `--overwrite`. `--overwrite` is accepted only with `--apply`.
+2. A source page goes directly in `sources/`. An entity page goes directly in a configured entity folder. A known folder name sets the only accepted type. A custom folder accepts any entity type. The page goes in the configured folder spelling.
+3. A new entity page cannot use a name or alias that already resolves to another page, with the same rules as `lookup`.
+4. A new source page cannot use a `source_url` that another source page uses. Unparsable source pages are skipped with a warning.
+
+Checks 3 and 4 apply only to new pages. Replacing an existing page skips them, so it can add an alias that another page owns.
+A request in a different folder spelling must resolve to the configured folder. A link that leads elsewhere is refused.
+
+The command writes only the target page, as UTF-8 with LF newlines. It writes and syncs a temporary file first. A failed write leaves no partial page and removes the folders it created. A new page that appears during the write is not replaced.
+On success, stdout gives `written | <vault-relative target>`. Exit codes are 0 for a written page, 1 for schema errors, 2 for input/configuration/write errors, and 3 for an admission refusal.
+Runtime-state migration remains separate.
 
 ### Configure the portable validation hook
 
